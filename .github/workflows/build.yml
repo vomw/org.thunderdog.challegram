@@ -78,6 +78,7 @@ jobs:
           TERM: dumb
         run: |
           chmod +x scripts/*.sh
+          chmod +x gradlew
           # Remove tput calls in set-env.sh to avoid terminal errors
           sed -i 's/\$(tput [^)]*)//g' scripts/set-env.sh
           

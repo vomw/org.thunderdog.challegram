@@ -78,6 +78,9 @@ jobs:
           TERM: dumb
         run: |
           chmod +x scripts/*.sh
+          # Disable tput in set-env.sh to avoid terminal errors
+          sed -i 's/tput .*/true"/' scripts/set-env.sh
+          
           # Pass ANDROID_SDK_ROOT explicitly or rely on env
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           bash scripts/setup.sh

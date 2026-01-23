@@ -10,10 +10,10 @@ else
   source "$(pwd)/scripts/setup-sdk.sh"
 fi
 
-if [[ -f local.properties ]]; then
-  echo -e "${STYLE_INFO}local.properties already exists. Cleaning...${STYLE_END}"
-  reset.sh
-fi
+# if [[ -f local.properties ]]; then
+#   echo -e "${STYLE_INFO}local.properties already exists. Cleaning...${STYLE_END}"
+#   reset.sh
+# fi
 
 # == Setup thirdparty libraries ==
 

@@ -15,11 +15,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          submodules: recursive
+          lfs: true
           fetch-depth: 0 # Full history for versioning logic
-
-      - name: Initialize Submodules
-        run: |
-          git submodule update --init --recursive
 
       - name: Install Dependencies
         run: |

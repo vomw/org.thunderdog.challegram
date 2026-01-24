@@ -25,7 +25,7 @@ CMAKE_VERSION=$(read-property.sh version.properties version.cmake)
 ANDROID_NDK_VERSION_PRIMARY=$(read-property.sh version.properties version.ndk_primary)
 ANDROID_NDK_VERSION_LEGACY=$(read-property.sh version.properties version.ndk_legacy)
 
-yes | "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager --licenses
+yes | "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
 yes | "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager --update
 yes | "$ANDROID_SDK_ROOT"/cmdline-tools/latest/bin/sdkmanager --install \
   "platforms;android-$COMPILE_SDK_VERSION" \

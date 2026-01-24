@@ -15,17 +15,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          submodules: recursive
           lfs: true
           fetch-depth: 0 # Full history for versioning logic
 
-      - name: Initialize Submodules
+      - name: Force Update Submodules
         run: |
-          git submodule update --init --recursive
-
-      - name: List Root Directory
-        run: |
-          ls -la
-          ls -la vkryl || echo "vkryl dir empty or missing"
+          git submodule update --init --recursive --force
+          ls -R vkryl || echo "vkryl missing"
 
       - name: Install Dependencies
         run: |

@@ -17,7 +17,6 @@ jobs:
         with:
           submodules: recursive
           lfs: true
-          fetch-depth: 0 # Full history for versioning logic
 
       - name: Force Update Submodules
         run: |

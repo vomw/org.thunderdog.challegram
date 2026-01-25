@@ -102,12 +102,12 @@
 	path = app/jni/third_party/webrtc
 	url = https://github.com/TGX-Android/webrtc
 	shallow = true
-	branch = telegram
+	branch = production
 [submodule "tgcalls"]
 	path = app/jni/third_party/tgcalls
 	url = https://github.com/TGX-Android/tgcalls
 	shallow = true
-	branch = main
+	branch = production
 [submodule "libevent"]
 	path = app/jni/third_party/libevent
 	url = https://github.com/TGX-Android/libevent

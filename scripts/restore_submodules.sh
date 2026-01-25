@@ -1,7 +1,12 @@
 #!/bin/bash
 set -e
 
-echo "Starting smart submodule restoration..."
+echo "Starting robust submodule restoration..."
+
+# Function to check if a directory is empty
+is_empty() {
+    [ -z "$(ls -A "$1" 2>/dev/null)" ]
+}
 
 # Iterate over each submodule defined in .gitmodules
 git config -f .gitmodules --name-only --get-regexp path | while read path_key; do
@@ -11,60 +16,45 @@ git config -f .gitmodules --name-only --get-regexp path | while read path_key; d
     # Read properties
     path=$(git config -f .gitmodules --get "submodule.$name.path")
     url=$(git config -f .gitmodules --get "submodule.$name.url")
-    
-    # Get the expected commit hash from the parent repo's tree
-    # git ls-tree output: mode type object path
-    # e.g., 160000 commit 12345abcdef...  some/path
-    expected_commit=$(git ls-tree HEAD "$path" | awk '{print $3}')
+    branch=$(git config -f .gitmodules --get "submodule.$name.branch" || echo "")
 
-    echo "Processing $name..."
-    echo "  Path: $path"
-    echo "  URL:  $url"
-    echo "  Expected Commit: $expected_commit"
+    echo "Checking submodule: $name ($path)"
 
-    if [ -z "$expected_commit" ]; then
-        echo "  WARNING: Could not determine expected commit for $path. Skipping."
-        continue
-    fi
-
-    # Check if the directory exists and has the correct commit checked out
-    current_commit=""
-    if [ -d "$path/.git" ] || [ -f "$path/.git" ]; then
-        pushd "$path" > /dev/null
-        current_commit=$(git rev-parse HEAD)
-        popd > /dev/null
-    fi
-
-    if [ "$current_commit" == "$expected_commit" ]; then
-        echo "  Submodule already at correct commit. Skipping."
-        continue
-    fi
-
-    echo "  Restoring/Updating submodule..."
-    
-    # Ensure parent directory exists
-    mkdir -p "$(dirname "$path")"
-    
-    # If directory exists but is not a valid git repo or wrong remote, clear it
-    if [ -d "$path" ] && [ ! -d "$path/.git" ] && [ ! -f "$path/.git" ]; then
+    # Check if the directory is missing or empty
+    if [ ! -d "$path" ] || is_empty "$path"; then
+        echo "  -> Missing or empty. Restoring..."
+        
+        # Ensure parent directory exists
+        mkdir -p "$(dirname "$path")"
+        
+        # Remove dir if it exists but is empty/broken
         rm -rf "$path"
+        
+        # Clone
+        if [ -n "$branch" ]; then
+            echo "  -> Cloning branch: $branch"
+            git clone --depth 1 --recursive --branch "$branch" "$url" "$path"
+        else
+            echo "  -> Cloning HEAD"
+            git clone --depth 1 --recursive "$url" "$path"
+        fi
+    else
+        echo "  -> Exists. Attempting update..."
+        # Try to update it if it exists
+        git submodule update --init --recursive "$path" || echo "  -> Update failed (non-fatal, continuing)"
     fi
-
-    if [ ! -d "$path" ]; then
-        git clone "$url" "$path"
-    fi
-
-    # Checkout the specific commit
-    pushd "$path" > /dev/null
-    git fetch origin  # Ensure we have the latest objects
-    git checkout "$expected_commit"
-    popd > /dev/null
-    
-    echo "  Success."
 done
 
-# Initialize recursive submodules if any (using standard git command for nested ones as they should be consistent now)
-echo "Initializing nested submodules..."
-git submodule update --init --recursive
+echo "Running final recursive update..."
+git submodule update --init --recursive || true
 
-echo "Smart submodule restoration complete."
+echo "Verifying 'opus'..."
+if [ -d "app/jni/third_party/opus" ]; then
+    echo "  -> app/jni/third_party/opus exists."
+    ls -A "app/jni/third_party/opus" | head -n 5
+else
+    echo "  -> app/jni/third_party/opus STILL MISSING!"
+    exit 1
+fi
+
+echo "Robust submodule restoration complete."

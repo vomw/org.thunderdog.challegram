@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting manual submodule restoration..."
+echo "Starting smart submodule restoration..."
 
 # Iterate over each submodule defined in .gitmodules
 git config -f .gitmodules --name-only --get-regexp path | while read path_key; do
@@ -11,31 +11,60 @@ git config -f .gitmodules --name-only --get-regexp path | while read path_key; d
     # Read properties
     path=$(git config -f .gitmodules --get "submodule.$name.path")
     url=$(git config -f .gitmodules --get "submodule.$name.url")
-    branch=$(git config -f .gitmodules --get "submodule.$name.branch" || echo "")
+    
+    # Get the expected commit hash from the parent repo's tree
+    # git ls-tree output: mode type object path
+    # e.g., 160000 commit 12345abcdef...  some/path
+    expected_commit=$(git ls-tree HEAD "$path" | awk '{print $3}')
 
-    # Check if the directory is missing or empty
-    if [ ! -d "$path" ] || [ -z "$(ls -A "$path" 2>/dev/null)" ]; then
-        echo "------------------------------------------------"
-        echo "Restoring missing submodule: $name"
-        echo "  Path: $path"
-        echo "  URL:  $url"
-        echo "  Branch: ${branch:-HEAD}"
-        
-        # Ensure parent directory exists
-        mkdir -p "$(dirname "$path")"
-        
-        # Remove empty dir if it exists to avoid clone errors
-        rm -rf "$path"
-        
-        # Clone
-        if [ -n "$branch" ]; then
-            git clone --depth 1 --recursive --branch "$branch" "$url" "$path"
-        else
-            git clone --depth 1 --recursive "$url" "$path"
-        fi
-    else
-        echo "Submodule $name appears to exist at $path. Skipping."
+    echo "Processing $name..."
+    echo "  Path: $path"
+    echo "  URL:  $url"
+    echo "  Expected Commit: $expected_commit"
+
+    if [ -z "$expected_commit" ]; then
+        echo "  WARNING: Could not determine expected commit for $path. Skipping."
+        continue
     fi
+
+    # Check if the directory exists and has the correct commit checked out
+    current_commit=""
+    if [ -d "$path/.git" ] || [ -f "$path/.git" ]; then
+        pushd "$path" > /dev/null
+        current_commit=$(git rev-parse HEAD)
+        popd > /dev/null
+    fi
+
+    if [ "$current_commit" == "$expected_commit" ]; then
+        echo "  Submodule already at correct commit. Skipping."
+        continue
+    fi
+
+    echo "  Restoring/Updating submodule..."
+    
+    # Ensure parent directory exists
+    mkdir -p "$(dirname "$path")"
+    
+    # If directory exists but is not a valid git repo or wrong remote, clear it
+    if [ -d "$path" ] && [ ! -d "$path/.git" ] && [ ! -f "$path/.git" ]; then
+        rm -rf "$path"
+    fi
+
+    if [ ! -d "$path" ]; then
+        git clone "$url" "$path"
+    fi
+
+    # Checkout the specific commit
+    pushd "$path" > /dev/null
+    git fetch origin  # Ensure we have the latest objects
+    git checkout "$expected_commit"
+    popd > /dev/null
+    
+    echo "  Success."
 done
 
-echo "Manual submodule restoration complete."
+# Initialize recursive submodules if any (using standard git command for nested ones as they should be consistent now)
+echo "Initializing nested submodules..."
+git submodule update --init --recursive
+
+echo "Smart submodule restoration complete."

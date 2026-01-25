@@ -17,21 +17,43 @@ jobs:
         with:
           submodules: false
           lfs: true
-          fetch-depth: 1 # Shallow clone to avoid issues and speed up
+          fetch-depth: 0
 
       - name: Initialize Submodules
         run: |
-          git submodule update --init --recursive --force
+          echo "=== .gitmodules ==="
+          cat .gitmodules
+          echo "====================="
           
-          # Verification and recovery
-          if [ ! -d "app/jni/third_party/opus" ] || [ -z "$(ls -A app/jni/third_party/opus)" ]; then
-            echo "Opus submodule missing or empty. Retrying..."
-            git submodule update --init --force app/jni/third_party/opus
+          echo "=== git submodule status (pre) ==="
+          git submodule status || true
+          echo "=================================="
+
+          # Initialize and update submodules
+          echo "Syncing submodules..."
+          git submodule sync --recursive
+          
+          echo "Updating submodules..."
+          git submodule update --init --recursive
+
+          echo "=== git submodule status (post) ==="
+          git submodule status || true
+          echo "==================================="
+          
+          echo "=== Checking critical submodules ==="
+          if [ -d "app/jni/third_party/opus" ]; then
+            echo "Opus dir exists."
+            ls -A app/jni/third_party/opus
+          else
+            echo "Opus dir MISSING."
           fi
           
-          echo "Verifying submodules..."
-          ls -R vkryl | head -n 5 || echo "vkryl missing"
-          ls -R app/jni/third_party/opus || echo "opus missing"
+          if [ -d "vkryl" ]; then
+             echo "vkryl dir exists."
+             ls -A vkryl
+          else
+             echo "vkryl dir MISSING."
+          fi
 
       - name: Install Dependencies
         run: |

@@ -19,41 +19,18 @@ jobs:
           lfs: true
           fetch-depth: 0
 
-      - name: Initialize Submodules
+      - name: Initialize Submodules (Manual Restore)
         run: |
           echo "=== .gitmodules ==="
           cat .gitmodules
           echo "====================="
           
-          echo "=== git submodule status (pre) ==="
-          git submodule status || true
-          echo "=================================="
-
-          # Initialize and update submodules
-          echo "Syncing submodules..."
-          git submodule sync --recursive
+          chmod +x scripts/restore_submodules.sh
+          bash scripts/restore_submodules.sh
           
-          echo "Updating submodules..."
-          git submodule update --init --recursive
-
-          echo "=== git submodule status (post) ==="
-          git submodule status || true
-          echo "==================================="
-          
-          echo "=== Checking critical submodules ==="
-          if [ -d "app/jni/third_party/opus" ]; then
-            echo "Opus dir exists."
-            ls -A app/jni/third_party/opus
-          else
-            echo "Opus dir MISSING."
-          fi
-          
-          if [ -d "vkryl" ]; then
-             echo "vkryl dir exists."
-             ls -A vkryl
-          else
-             echo "vkryl dir MISSING."
-          fi
+          echo "=== Verification ==="
+          ls -R vkryl | head -n 5 || echo "vkryl missing"
+          ls -A app/jni/third_party/opus || echo "opus missing"
 
       - name: Install Dependencies
         run: |

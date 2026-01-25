@@ -21,10 +21,6 @@ jobs:
 
       - name: Initialize Submodules (Manual Restore)
         run: |
-          echo "=== .gitmodules ==="
-          cat .gitmodules
-          echo "====================="
-          
           chmod +x scripts/restore_submodules.sh
           bash scripts/restore_submodules.sh
           
@@ -96,11 +92,15 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           bash scripts/setup.sh
 
+      - name:  Get a list of available tasks
+        # run: ./gradlew task --debug
+        run: ./gradlew task
+
       - name: Build with Gradle
-        run: ./gradlew assembleUniversalRelease
+        run: ./gradlew assembleLatestUniversalRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: telegram-x-universal-release
-          path: app/build/outputs/apk/universal/release/*.apk
+          path: app/build/outputs/apk/latest/universal/release/*.apk

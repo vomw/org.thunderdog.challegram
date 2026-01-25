@@ -17,11 +17,18 @@ jobs:
         with:
           submodules: false
           lfs: true
-          fetch-depth: 0 # Full history for versioning logic
+          fetch-depth: 1 # Shallow clone to avoid issues and speed up
 
       - name: Initialize Submodules
         run: |
-          git submodule update --init --recursive
+          git submodule update --init --recursive --force
+          
+          # Verification and recovery
+          if [ ! -d "app/jni/third_party/opus" ] || [ -z "$(ls -A app/jni/third_party/opus)" ]; then
+            echo "Opus submodule missing or empty. Retrying..."
+            git submodule update --init --force app/jni/third_party/opus
+          fi
+          
           echo "Verifying submodules..."
           ls -R vkryl | head -n 5 || echo "vkryl missing"
           ls -R app/jni/third_party/opus || echo "opus missing"

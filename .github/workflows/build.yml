@@ -37,10 +37,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y $(sed 's/=.*//' reproducible-builds/dependencies.txt)
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       - name: Decode Keystore

@@ -15,18 +15,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
           lfs: true
+          fetch-depth: 0 # Full history for versioning logic
 
-      - name: Force Update Submodules
+      - name: Initialize Submodules
         run: |
-          git submodule update --init --recursive --force
-          ls -R vkryl || echo "vkryl missing"
+          git submodule update --init --recursive
+          echo "Verifying submodules..."
+          ls -R vkryl | head -n 5 || echo "vkryl missing"
+          ls -R app/jni/third_party/opus || echo "opus missing"
 
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          # Strip strict version numbers from dependencies.txt to use available versions
           sudo apt-get install -y $(sed 's/=.*//' reproducible-builds/dependencies.txt)
 
       - name: Set up JDK 17
@@ -61,7 +63,6 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
-          # Ensure ANDROID_SDK_ROOT is set for scripts
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
           
           cat <<EOF > local.properties
@@ -74,19 +75,18 @@ jobs:
           app.download_url=https://t.me/tgx_log
           app.sources_url=https://github.com/TGX-Android/Telegram-X
           EOF
-          # Note: Fallback dummy values for API ID/Hash allow build to proceed in PRs without secrets,
-          # but the app won't connect to Telegram.
 
       - name: Run Setup Script
         env:
           TERM: dumb
         run: |
+          chmod +x scripts/*.sh
           chmod -R +x scripts/
           chmod +x gradlew
+          
           # Remove tput calls in set-env.sh to avoid terminal errors
           sed -i 's/\$(tput [^)]*)//g' scripts/set-env.sh
           
-          # Pass ANDROID_SDK_ROOT explicitly or rely on env
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           bash scripts/setup.sh
 

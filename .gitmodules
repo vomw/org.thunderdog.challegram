@@ -135,3 +135,63 @@
 [submodule "thirdparty/androidx-media/lollipop"]
 	path = thirdparty/androidx-media/lollipop
 	url = https://github.com/androidx/media
+[submodule "app/jni/third_party/openh264"]
+	path = app/jni/third_party/openh264
+	url = https://github.com/cisco/openh264
+[submodule "app/jni/third_party/webp"]
+	path = app/jni/third_party/webp
+	url = https://github.com/webmproject/libwebp
+[submodule "app/jni/third_party/libtgvoip"]
+	path = app/jni/third_party/libtgvoip
+	url = https://github.com/TGX-Android/libtgvoip
+[submodule "app/jni/third_party/ffmpeg"]
+	path = app/jni/third_party/ffmpeg
+	url = https://github.com/FFmpeg/FFmpeg
+[submodule "app/jni/third_party/lz4"]
+	path = app/jni/third_party/lz4
+	url = https://github.com/lz4/lz4
+[submodule "thirdparty/androidx-media/legacy"]
+	path = thirdparty/androidx-media/legacy
+	url = https://github.com/androidx/media
+[submodule "app/jni/third_party/flac"]
+	path = app/jni/third_party/flac
+	url = https://github.com/xiph/flac
+[submodule "app/jni/third_party/opus"]
+	path = app/jni/third_party/opus
+	url = https://github.com/xiph/opus
+[submodule "app/jni/third_party/opusfile"]
+	path = app/jni/third_party/opusfile
+	url = https://github.com/xiph/opusfile
+[submodule "app/jni/third_party/ogg"]
+	path = app/jni/third_party/ogg
+	url = https://github.com/xiph/ogg
+[submodule "app/jni/third_party/libvpx"]
+	path = app/jni/third_party/libvpx
+	url = https://github.com/webmproject/libvpx
+[submodule "app/jni/third_party/jni-utils"]
+	path = app/jni/third_party/jni-utils
+	url = https://github.com/TGX-Android/jni-utils
+[submodule "app/jni/third_party/rlottie"]
+	path = app/jni/third_party/rlottie
+	url = https://github.com/TGX-Android/rlottie
+[submodule "app/jni/third_party/usrsctp"]
+	path = app/jni/third_party/usrsctp
+	url = https://github.com/sctplab/usrsctp
+[submodule "app/jni/third_party/webrtc"]
+	path = app/jni/third_party/webrtc
+	url = https://github.com/TGX-Android/webrtc
+[submodule "app/jni/third_party/tgcalls"]
+	path = app/jni/third_party/tgcalls
+	url = https://github.com/TGX-Android/tgcalls
+[submodule "app/jni/third_party/libevent"]
+	path = app/jni/third_party/libevent
+	url = https://github.com/TGX-Android/libevent
+[submodule "app/jni/third_party/crc32c"]
+	path = app/jni/third_party/crc32c
+	url = https://github.com/google/crc32c
+[submodule "app/jni/third_party/rnnoise"]
+	path = app/jni/third_party/rnnoise
+	url = https://github.com/xiph/rnnoise
+[submodule "app/jni/third_party/webrtc_deps/base"]
+	path = app/jni/third_party/webrtc_deps/base
+	url = https://chromium.googlesource.com/chromium/src/base

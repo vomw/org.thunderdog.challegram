@@ -20,11 +20,8 @@ add_library(srtp STATIC
   "${SRTP_DIR}/crypto/kernel/err.c"
   "${SRTP_DIR}/crypto/kernel/key.c"
   "${SRTP_DIR}/crypto/math/datatypes.c"
-  "${SRTP_DIR}/crypto/math/stat.c"
   "${SRTP_DIR}/crypto/replay/rdb.c"
   "${SRTP_DIR}/crypto/replay/rdbx.c"
-  "${SRTP_DIR}/crypto/replay/ut_sim.c"
-  "${SRTP_DIR}/srtp/ekt.c"
   "${SRTP_DIR}/srtp/srtp.c"
 )
 # config.h options match the ones used in Chromium:

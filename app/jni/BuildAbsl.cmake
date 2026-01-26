@@ -331,7 +331,6 @@ add_library(absl STATIC
   "${ABSL_DIR}/absl/strings/str_cat.cc"
   "${ABSL_DIR}/absl/strings/str_replace.cc"
   "${ABSL_DIR}/absl/strings/str_split.cc"
-  "${ABSL_DIR}/absl/strings/string_view.cc"
   "${ABSL_DIR}/absl/strings/substitute.cc"
   "${ABSL_DIR}/absl/synchronization/barrier.cc"
   "${ABSL_DIR}/absl/synchronization/blocking_counter.cc"

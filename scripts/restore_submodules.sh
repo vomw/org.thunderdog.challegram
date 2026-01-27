@@ -29,9 +29,9 @@ git config -f .gitmodules --name-only --get-regexp path | while read path_key; d
         
         # Clone
         if [ -n "$branch" ]; then
-            git clone --depth 1 --recursive --branch "$branch" "$url" "$path"
+            git clone --recursive --branch "$branch" "$url" "$path"
         else
-            git clone --depth 1 --recursive "$url" "$path"
+            git clone --recursive "$url" "$path"
         fi
     else
         echo "Submodule $name appears to exist at $path. Skipping."

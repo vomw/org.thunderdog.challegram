@@ -299,7 +299,7 @@ add_library(absl STATIC
   "${ABSL_DIR}/absl/random/internal/chi_square.cc"
   "${ABSL_DIR}/absl/random/internal/distribution_test_util.cc"
   "${ABSL_DIR}/absl/random/internal/nanobenchmark.cc"
-  "${ABSL_DIR}/absl/random/internal/pool_urbg.cc"
+
   "${ABSL_DIR}/absl/random/internal/randen.cc"
   "${ABSL_DIR}/absl/random/internal/randen_detect.cc"
   "${ABSL_DIR}/absl/random/internal/randen_hwaes.cc"

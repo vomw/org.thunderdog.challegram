@@ -15,17 +15,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: false
+          repository: TGX-Android/Telegram-X
+          submodules: recursive
           lfs: true
-          fetch-depth: 0
+          # fetch-depth: 0
 
-      - name: Initialize Submodules (Manual Restore)
-        run: |
-          chmod +x scripts/restore_submodules.sh
-          bash scripts/restore_submodules.sh
+      # - name: Initialize Submodules (Manual Restore)
+      #   run: |
+      #     chmod +x scripts/restore_submodules.sh
+      #     bash scripts/restore_submodules.sh
           
-          echo "=== Verification ==="
-          ls -R vkryl | head -n 5 || echo "vkryl missing"
+      #     echo "=== Verification ==="
+      #     ls -R vkryl | head -n 5 || echo "vkryl missing"
           ls -A app/jni/third_party/opus || echo "opus missing"
 
       - name: Install Dependencies

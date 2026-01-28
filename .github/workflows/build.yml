@@ -92,12 +92,8 @@ jobs:
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           bash scripts/setup.sh
 
-      - name:  Get a list of available tasks
-        # run: ./gradlew task --debug
-        run: ./gradlew task
-
       - name: Build with Gradle
-        run: ./gradlew assembleLatestUniversalRelease
+        run: ./gradlew --debug assembleLatestUniversalRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

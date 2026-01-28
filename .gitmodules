@@ -21,6 +21,7 @@
 	path = app/jni/third_party/lz4
 	url = https://github.com/lz4/lz4
 	shallow = true
+	branch = v1.9.4
 [submodule "androidx-media"]
 	path = thirdparty/androidx-media/legacy
 	url = https://github.com/androidx/media
@@ -30,22 +31,27 @@
 	path = app/jni/third_party/flac
 	url = https://github.com/xiph/flac
 	shallow = true
+	branch = 1.4.3
 [submodule "opus"]
 	path = app/jni/third_party/opus
 	url = https://github.com/xiph/opus
 	shallow = true
+	branch = v1.4
 [submodule "opusfile"]
 	path = app/jni/third_party/opusfile
 	url = https://github.com/xiph/opusfile
 	shallow = true
+	branch = v0.12
 [submodule "ogg"]
 	path = app/jni/third_party/ogg
 	url = https://github.com/xiph/ogg
 	shallow = true
+	branch = v1.3.5
 [submodule "libvpx"]
 	path = app/jni/third_party/libvpx
 	url = https://github.com/webmproject/libvpx
 	shallow = true
+	branch = v1.13.1
 [submodule "tdlib"]
 	path = tdlib
 	url = https://github.com/TGX-Android/tdlib
@@ -85,10 +91,12 @@
 	path = app/jni/third_party/usrsctp
 	url = https://github.com/sctplab/usrsctp
 	shallow = true
+	branch = 0.9.5.0
 [submodule "libsrtp"]
 	path = app/jni/third_party/libsrtp
 	url = https://github.com/cisco/libsrtp
 	shallow = true
+	branch = v2.3.0
 [submodule "openh264"]
 	path = app/jni/third_party/openh264
 	url = https://github.com/cisco/openh264
@@ -98,6 +106,7 @@
 	path = app/jni/third_party/abseil-cpp
 	url = https://github.com/abseil/abseil-cpp
 	shallow = true
+	branch = 20230125.3
 [submodule "webrtc"]
 	path = app/jni/third_party/webrtc
 	url = https://github.com/TGX-Android/webrtc

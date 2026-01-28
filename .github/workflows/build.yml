@@ -27,7 +27,7 @@ jobs:
           
       #     echo "=== Verification ==="
       #     ls -R vkryl | head -n 5 || echo "vkryl missing"
-          ls -A app/jni/third_party/opus || echo "opus missing"
+      #     ls -A app/jni/third_party/opus || echo "opus missing"
 
       - name: Install Dependencies
         run: |

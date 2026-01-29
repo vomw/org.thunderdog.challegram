@@ -18,16 +18,7 @@ jobs:
           repository: TGX-Android/Telegram-X
           submodules: recursive
           lfs: true
-          # fetch-depth: 0
-
-      # - name: Initialize Submodules (Manual Restore)
-      #   run: |
-      #     chmod +x scripts/restore_submodules.sh
-      #     bash scripts/restore_submodules.sh
-          
-      #     echo "=== Verification ==="
-      #     ls -R vkryl | head -n 5 || echo "vkryl missing"
-      #     ls -A app/jni/third_party/opus || echo "opus missing"
+          fetch-depth: 1
 
       - name: Install Dependencies
         run: |
@@ -94,7 +85,7 @@ jobs:
           bash scripts/setup.sh
 
       - name: Build with Gradle
-        run: ./gradlew --debug assembleLatestUniversalRelease
+        run: ./gradlew assembleLatestUniversalRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

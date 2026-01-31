@@ -5,31 +5,39 @@ on:
     branches: [ "master", "main" ]
   pull_request:
     branches: [ "master", "main" ]
-  workflow_dispatch: # Allows manual triggering from the Actions tab
+  workflow_dispatch:
 
 jobs:
   build:
     name: Build Universal APK
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-22.04 # Ubuntu 22.04 is explicitly recommended by TGX docs
 
     steps:
-      # 1. Clone Source Code (Recursive for Submodules)
+      # 1. Install System Dependencies (Crucial Step Added)
+      # These tools are often required to compile the C++ Native libraries (TDLib)
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git-lfs cmake ninja-build gperf ccache libssl-dev python3-dev
+          git lfs install
+
+      # 2. Clone Source Code
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
           submodules: 'recursive'
-          lfs: true
           fetch-depth: 0
+          lfs: true # Explicitly enable LFS fetching
 
-      # 2. Setup Java 17 (Required for Android Builds)
+      # 3. Setup Java 17
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
 
-      # 3. Cache Gradle Packages (Speeds up future builds)
+      # 4. Cache Gradle Packages
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
@@ -40,47 +48,41 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # 4. Configure local.properties
-      # Requires Secrets: TELEGRAM_API_ID, TELEGRAM_API_HASH
+      # 5. Configure local.properties
       - name: Create local.properties
         run: |
           echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
           echo "telegram.api_id=${{ secrets.TELEGRAM_API_ID }}" >> local.properties
           echo "telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}" >> local.properties
           
-          # Handle Google Services (Dummy file to prevent build error if missing)
+          # Create dummy google-services.json to bypass build check
           if [ ! -f app/google-services.json ]; then
-            echo "Creating dummy google-services.json"
             echo '{}' > app/google-services.json
           fi
 
-      # 5. Configure Keystore and Signing
-      # Generates a temporary debug keystore to allow the Release build to succeed without exposing real keys.
-      # If you have a real keystore, replace this step with base64 decoding logic.
+      # 6. Configure Keystore (Temporary Debug Key)
       - name: Setup Keystore
         run: |
-          # Generate a self-signed key for the build
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           
-          # Create keystore.properties pointing to the generated key
           echo "keystore.file=$(pwd)/debug.keystore" > keystore.properties
           echo "keystore.password=android" >> keystore.properties
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 6. Run Repository Setup Script
-      # Handles NDK setup and native dependencies (TDLib)
+      # 7. Run Repository Setup Script
+      # This script downloads the specific NDK version required by the project
       - name: Run Setup Script
         run: |
           chmod +x scripts/setup.sh
-          ./scripts/setup.sh
+          # Pass 'y' to automatically accept SDK licenses if prompted
+          yes | ./scripts/setup.sh
 
-      # 7. Build the APK
-      # Uses the 'Universal' flavor to support all architectures
+      # 8. Build the APK
       - name: Build Universal Release APK
         run: ./gradlew assembleUniversalRelease --stacktrace
 
-      # 8. Upload Artifact
+      # 9. Upload Artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

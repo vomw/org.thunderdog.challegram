@@ -70,6 +70,27 @@ jobs:
           app.sources_url=https://github.com/TGX-Android/Telegram-X
           EOF
 
+      - name: Create local.properties
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          
+          cat <<EOF > local.properties
+          sdk.dir=$ANDROID_HOME
+          keystore.file=$(pwd)/keystore.properties
+          telegram.api_id=${TELEGRAM_API_ID:-12345}
+          telegram.api_hash=${TELEGRAM_API_HASH:-0123456789abcdef0123456789abcdef}
+          app.id=org.thunderdog.challegram
+          app.name=Telegram X
+          app.download_url=https://t.me/tgx_log
+          app.sources_url=https://github.com/TGX-Android/Telegram-X
+          EOF
+
+      - name: Accept Android SDK Licenses
+        run: yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses
+
       - name: Run Setup Script
         env:
           TERM: dumb

@@ -31,8 +31,23 @@ jobs:
         with:
           repository: TGX-Android/Telegram-X
           submodules: 'recursive'
-          fetch-depth: 0
+          fetch-depth: 1
+          submodule-depth: 1
           lfs: true # Explicitly enable LFS fetching
+
+      # 2b. Cache Submodules
+      # This saves time on subsequent runs by not re-cloning dozens of repos
+      - name: Cache Submodules
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/jni/tgvoip/third_party
+            app/jni/third_party
+            tdlib
+            vkryl
+          key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules') }}
+          restore-keys: |
+            ${{ runner.os }}-submodules-
 
       # 3. Setup Java 21
       - name: Set up JDK 21

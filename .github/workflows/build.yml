@@ -11,11 +11,15 @@ jobs:
   build:
     name: Build Universal APK
     runs-on: ubuntu-22.04 # Ubuntu 22.04 is explicitly recommended by TGX docs
+    env:
+      TERM: xterm
 
     steps:
       # 1. Install System Dependencies (Crucial Step Added)
       # These tools are often required to compile the C++ Native libraries (TDLib)
       - name: Install System Dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
           sudo apt-get install -y git-lfs cmake ninja-build gperf ccache libssl-dev python3-dev
@@ -30,11 +34,11 @@ jobs:
           fetch-depth: 0
           lfs: true # Explicitly enable LFS fetching
 
-      # 3. Setup Java 17
-      - name: Set up JDK 17
+      # 3. Setup Java 21
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
       # 4. Cache Gradle Packages
@@ -74,13 +78,19 @@ jobs:
       # This script downloads the specific NDK version required by the project
       - name: Run Setup Script
         run: |
-          chmod +x scripts/setup.sh
-          # Pass 'y' to automatically accept SDK licenses if prompted
-          yes | ./scripts/setup.sh
+          if [ -f scripts/setup.sh ]; then
+            chmod +x scripts/setup.sh
+            # Pass 'y' to automatically accept SDK licenses if prompted
+            yes | ./scripts/setup.sh
+          else
+            echo "scripts/setup.sh not found, skipping."
+          fi
 
       # 8. Build the APK
       - name: Build Universal Release APK
-        run: ./gradlew assembleUniversalRelease --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleUniversalRelease --stacktrace
 
       # 9. Upload Artifact
       - name: Upload APK

@@ -15,78 +15,23 @@ jobs:
       TERM: xterm
 
     steps:
-      # 1. Install System Dependencies (Crucial Step Added)
-      # These tools are often required to compile the C++ Native libraries (TDLib)
-      - name: Install System Dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-lfs cmake ninja-build gperf ccache libssl-dev python3-dev
-          git lfs install
-
-      # 2. Clone Source Code
+      # 1. Clone Source Code
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
           submodules: 'recursive'
           fetch-depth: 1
-          submodule-depth: 1
           lfs: true # Explicitly enable LFS fetching
 
-      # 2b. Cache Submodules
-      # This saves time on subsequent runs by not re-cloning dozens of repos
-      - name: Cache Submodules
-        uses: actions/cache@v4
-        with:
-          path: |
-            app/jni/tgvoip/third_party
-            app/jni/third_party
-            tdlib
-            vkryl
-          key: ${{ runner.os }}-submodules-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            ${{ runner.os }}-submodules-
-
-      # 3. Setup Java 21
+      # 2. Setup Java 21
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # 3b. Cache Android NDK
-      # The setup script installs a specific version which we can persist
-      - name: Cache Android NDK
-        uses: actions/cache@v4
-        with:
-          path: /usr/local/lib/android/sdk/ndk/23.2.8568313
-          key: ${{ runner.os }}-ndk-23.2.8568313
-
-      # 3c. Pre-setup Android SDK
-      # Pre-accept licenses and install NDK to avoid warnings and speed up setup script
-      - name: Pre-setup Android SDK
-        run: |
-          SDK_MANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -f "$SDK_MANAGER" ]; then
-            SDK_MANAGER=$(find ${ANDROID_SDK_ROOT}/cmdline-tools -name sdkmanager | head -n 1)
-          fi
-          yes | "$SDK_MANAGER" --licenses || true
-          "$SDK_MANAGER" "ndk;23.2.8568313"
-
-      # 4. Cache Gradle Packages
-      - name: Cache Gradle packages
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-gradle-
-
-      # 5. Run Repository Setup Script
+      # 3. Run Repository Setup Script
       # This script downloads components and runs ./gradlew clean
       - name: Run Setup Script
         run: |
@@ -98,7 +43,7 @@ jobs:
             echo "scripts/setup.sh not found, skipping."
           fi
 
-      # 6. Configure local.properties
+      # 5. Configure local.properties
       # We do this after setup script to avoid it being overwritten during 'cleaning'
       - name: Create local.properties
         run: |
@@ -111,7 +56,7 @@ jobs:
             echo '{}' > app/google-services.json
           fi
 
-      # 7. Configure Keystore (Temporary Debug Key)
+      # 6. Configure Keystore (Temporary Debug Key)
       - name: Setup Keystore
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
@@ -121,17 +66,17 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-            # 8. Build the APK
-            - name: Build Universal Release APK
-              run: |
-                chmod +x gradlew
-                ./gradlew assembleLatestUniversalRelease --stacktrace
-      
-            # 9. Upload Artifact
-            - name: Upload APK
-              uses: actions/upload-artifact@v4
-              with:
-                name: TelegramX-Latest-Universal-Release
-                path: app/build/outputs/apk/latest/universal/release/*.apk
-                retention-days: 5
+      # 7. Build the APK
+      - name: Build Universal Release APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleLatestUniversalRelease --stacktrace
+
+      # 8. Upload Artifact
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TelegramX-Latest-Universal-Release
+          path: app/build/outputs/apk/latest/universal/release/*.apk
+          retention-days: 5
       

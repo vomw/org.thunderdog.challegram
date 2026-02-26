@@ -56,6 +56,25 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
+      # 3b. Cache Android NDK
+      # The setup script installs a specific version which we can persist
+      - name: Cache Android NDK
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/android/sdk/ndk/23.2.8568313
+          key: ${{ runner.os }}-ndk-23.2.8568313
+
+      # 3c. Pre-setup Android SDK
+      # Pre-accept licenses and install NDK to avoid warnings and speed up setup script
+      - name: Pre-setup Android SDK
+        run: |
+          SDK_MANAGER="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -f "$SDK_MANAGER" ]; then
+            SDK_MANAGER=$(find ${ANDROID_SDK_ROOT}/cmdline-tools -name sdkmanager | head -n 1)
+          fi
+          yes | "$SDK_MANAGER" --licenses || true
+          "$SDK_MANAGER" "ndk;23.2.8568313"
+
       # 4. Cache Gradle Packages
       - name: Cache Gradle packages
         uses: actions/cache@v4
@@ -67,7 +86,20 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      # 5. Configure local.properties
+      # 5. Run Repository Setup Script
+      # This script downloads components and runs ./gradlew clean
+      - name: Run Setup Script
+        run: |
+          if [ -f scripts/setup.sh ]; then
+            chmod +x scripts/setup.sh
+            # Pass 'y' to automatically accept SDK licenses if prompted
+            yes | ./scripts/setup.sh
+          else
+            echo "scripts/setup.sh not found, skipping."
+          fi
+
+      # 6. Configure local.properties
+      # We do this after setup script to avoid it being overwritten during 'cleaning'
       - name: Create local.properties
         run: |
           echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
@@ -79,7 +111,7 @@ jobs:
             echo '{}' > app/google-services.json
           fi
 
-      # 6. Configure Keystore (Temporary Debug Key)
+      # 7. Configure Keystore (Temporary Debug Key)
       - name: Setup Keystore
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
@@ -89,28 +121,17 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 7. Run Repository Setup Script
-      # This script downloads the specific NDK version required by the project
-      - name: Run Setup Script
-        run: |
-          if [ -f scripts/setup.sh ]; then
-            chmod +x scripts/setup.sh
-            # Pass 'y' to automatically accept SDK licenses if prompted
-            yes | ./scripts/setup.sh
-          else
-            echo "scripts/setup.sh not found, skipping."
-          fi
-
-      # 8. Build the APK
-      - name: Build Universal Release APK
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleUniversalRelease --stacktrace
-
-      # 9. Upload Artifact
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: TelegramX-Universal-Release
-          path: app/build/outputs/apk/universal/release/*.apk
-          retention-days: 5
+            # 8. Build the APK
+            - name: Build Universal Release APK
+              run: |
+                chmod +x gradlew
+                ./gradlew assembleLatestUniversalRelease --stacktrace
+      
+            # 9. Upload Artifact
+            - name: Upload APK
+              uses: actions/upload-artifact@v4
+              with:
+                name: TelegramX-Latest-Universal-Release
+                path: app/build/outputs/apk/latest/universal/release/*.apk
+                retention-days: 5
+      

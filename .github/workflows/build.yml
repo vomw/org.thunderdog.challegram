@@ -2,27 +2,26 @@ name: Build Telegram X APK
 
 on:
   push:
-  #   branches: [ "master", "main" ]
-  # pull_request:
-  #   branches: [ "master", "main" ]
+    branches: [ "master", "main" ]
+  pull_request:
+    branches: [ "master", "main" ]
   workflow_dispatch:
 
 jobs:
   build:
     name: Build Universal APK
-    runs-on: ubuntu-22.04 # Ubuntu 22.04 is explicitly recommended by TGX docs
+    runs-on: ubuntu-22.04
     env:
       TERM: xterm
 
     steps:
-      # 1. Clone Source Code
+      # 1. Checkout the current repository (mirror/fork)
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          repository: TGX-Android/Telegram-X
           submodules: 'recursive'
           fetch-depth: 1
-          lfs: true # Explicitly enable LFS fetching
+          lfs: true
 
       # 2. Setup Java 21
       - name: Set up JDK 21
@@ -31,32 +30,35 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      # 3. Run Repository Setup Script
-      # This script downloads components and runs ./gradlew clean
-      - name: Run Setup Script
+      # 3. Install System Dependencies
+      - name: Install System Dependencies
         run: |
-          if [ -f scripts/setup.sh ]; then
-            chmod +x scripts/setup.sh
-            # Pass 'y' to automatically accept SDK licenses if prompted
-            yes | ./scripts/setup.sh
-          else
-            echo "scripts/setup.sh not found, skipping."
-          fi
+          sudo apt-get update
+          sudo apt-get install -y yasm wget unzip gsed
 
-      # 5. Configure local.properties
-      # We do this after setup script to avoid it being overwritten during 'cleaning'
+      # 4. Pre-configure local.properties to avoid interactive setup
       - name: Create local.properties
         run: |
-          echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
-          echo "telegram.api_id=${{ secrets.TELEGRAM_API_ID }}" >> local.properties
-          echo "telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}" >> local.properties
+          # Load versions to get some defaults
+          BUILD_TOOLS_VERSION=$(grep "version.build_tools" version.properties | cut -d'=' -f2)
+          SDK_COMPILE_VERSION=$(grep "version.sdk_compile" version.properties | cut -d'=' -f2)
           
-          # Create dummy google-services.json to bypass build check
+          echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
+          echo "telegram.api_id=${{ secrets.TELEGRAM_API_ID || '12345' }}" >> local.properties
+          echo "telegram.api_hash=${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}" >> local.properties
+          echo "app.id=org.thunderdog.challegram" >> local.properties
+          echo "app.name=Telegram X" >> local.properties
+          echo "app.download_url=https://github.com/${{ github.repository }}" >> local.properties
+          echo "app.sources_url=https://github.com/${{ github.repository }}" >> local.properties
+          echo "tgx.extension=none" >> local.properties
+          echo "keystore.file=$(pwd)/keystore.properties" >> local.properties
+          
+          # Create dummy google-services.json if missing
           if [ ! -f app/google-services.json ]; then
-            echo '{}' > app/google-services.json
+            echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
           fi
 
-      # 6. Configure Keystore (Temporary Debug Key)
+      # 5. Setup Keystore (Debug Key)
       - name: Setup Keystore
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
@@ -66,13 +68,33 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 7. Build the APK
+      # 6. Patch build scripts to be non-interactive and faster
+      - name: Patch Build Scripts
+        run: |
+          # Disable interactive setup-properties.sh and reset.sh in setup.sh
+          sed -i 's/setup-properties.sh/# setup-properties.sh/' scripts/setup.sh
+          sed -i 's/reset.sh/# reset.sh/' scripts/setup.sh
+          
+          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
+          # Patch FFmpeg build function to skip unwanted variants
+          sed -i '/function build_one {/a \  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
+          
+          # Patch libvpx build function to skip unwanted variants
+          sed -i '/configure_make() {/a \  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
+
+      # 7. Run Setup Script (Installs NDKs and builds native libraries)
+      - name: Run Setup Script
+        run: |
+          chmod +x scripts/*.sh scripts/private/*.sh
+          yes | ./scripts/setup.sh
+
+      # 8. Build the APK
       - name: Build Universal Release APK
         run: |
           chmod +x gradlew
           ./gradlew assembleLatestUniversalRelease --stacktrace
 
-      # 8. Upload Artifact
+      # 9. Upload Artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

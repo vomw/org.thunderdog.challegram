@@ -28,9 +28,18 @@ jobs:
       - name: Force Sync Submodules
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --force --depth 1
+          # Try to fix "opus" and others if they are missing
+          git submodule update --init --recursive --force --depth 1 || true
+          # If still missing, try deinit and update
+          if [ ! -d "app/jni/third_party/opus" ]; then
+            echo "Submodules missing, trying harder..."
+            git submodule deinit -f . || true
+            git submodule update --init --recursive --force --depth 1
+          fi
+          echo "Submodule status:"
+          git submodule status --recursive
           echo "Checking third_party contents:"
-          ls -F app/jni/third_party/
+          ls -F app/jni/third_party/ || true
 
       # 3. Setup Java 21
       - name: Set up JDK 21
@@ -81,9 +90,12 @@ jobs:
           sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
           # Disable interactive setup-properties.sh and reset.sh in setup.sh
-          # Use a more robust approach to catch lines with indentation
-          sed -i 's/^[[:space:]]*reset.sh/: # reset.sh/' scripts/setup.sh
-          sed -i 's/^[[:space:]]*setup-properties.sh/: # setup-properties.sh/' scripts/setup.sh
+          # Use a very aggressive approach: delete the lines calling them
+          sed -i '/reset.sh/d' scripts/setup.sh
+          sed -i '/setup-properties.sh/d' scripts/setup.sh
+          
+          # Avoid broken pipe in setup-sdk.sh by replacing yes | with echo y | or similar
+          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
           # Patch FFmpeg build function to skip unwanted variants

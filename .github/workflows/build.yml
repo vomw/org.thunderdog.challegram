@@ -21,14 +21,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-          fetch-depth: 1
+          fetch-depth: 0 # Full history to ensure submodules are properly handled
           lfs: true
 
       # 2. Ensure submodules are actually there
-      - name: Sync Submodules
+      - name: Force Sync Submodules
         run: |
           git submodule sync --recursive
-          git submodule update --init --recursive --depth 1
+          git submodule update --init --recursive --force --depth 1
+          echo "Checking third_party contents:"
+          ls -F app/jni/third_party/
 
       # 3. Setup Java 21
       - name: Set up JDK 21
@@ -75,9 +77,13 @@ jobs:
       # 7. Patch build scripts to be non-interactive and faster
       - name: Patch Build Scripts
         run: |
+          # Fix typo in set-env.sh
+          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          
           # Disable interactive setup-properties.sh and reset.sh in setup.sh
-          sed -i 's/setup-properties.sh/# setup-properties.sh/' scripts/setup.sh
-          sed -i 's/reset.sh/# reset.sh/' scripts/setup.sh
+          # Use a more robust approach to catch lines with indentation
+          sed -i 's/^[[:space:]]*reset.sh/: # reset.sh/' scripts/setup.sh
+          sed -i 's/^[[:space:]]*setup-properties.sh/: # setup-properties.sh/' scripts/setup.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
           # Patch FFmpeg build function to skip unwanted variants

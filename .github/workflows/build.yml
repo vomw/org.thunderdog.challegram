@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       TERM: xterm
+      ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
       # 1. Checkout the current repository (mirror/fork)
@@ -34,7 +35,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip gsed
+          sudo apt-get install -y yasm wget unzip
 
       # 4. Pre-configure local.properties to avoid interactive setup
       - name: Create local.properties

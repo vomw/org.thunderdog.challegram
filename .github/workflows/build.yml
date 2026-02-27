@@ -24,26 +24,29 @@ jobs:
           fetch-depth: 1
           lfs: true
 
-      # 2. Setup Java 21
+      # 2. Ensure submodules are actually there
+      - name: Sync Submodules
+        run: |
+          git submodule sync --recursive
+          git submodule update --init --recursive --depth 1
+
+      # 3. Setup Java 21
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
 
-      # 3. Install System Dependencies
+      # 4. Install System Dependencies
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip
 
-      # 4. Pre-configure local.properties to avoid interactive setup
+      # 5. Pre-configure local.properties to avoid interactive setup
       - name: Create local.properties
         run: |
-          # Load versions to get some defaults
-          BUILD_TOOLS_VERSION=$(grep "version.build_tools" version.properties | cut -d'=' -f2)
-          SDK_COMPILE_VERSION=$(grep "version.sdk_compile" version.properties | cut -d'=' -f2)
-          
+          mkdir -p "${ANDROID_SDK_ROOT}"
           echo "sdk.dir=${ANDROID_SDK_ROOT}" > local.properties
           echo "telegram.api_id=${{ secrets.TELEGRAM_API_ID || '12345' }}" >> local.properties
           echo "telegram.api_hash=${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}" >> local.properties
@@ -59,7 +62,7 @@ jobs:
             echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
           fi
 
-      # 5. Setup Keystore (Debug Key)
+      # 6. Setup Keystore (Debug Key)
       - name: Setup Keystore
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
@@ -69,7 +72,7 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 6. Patch build scripts to be non-interactive and faster
+      # 7. Patch build scripts to be non-interactive and faster
       - name: Patch Build Scripts
         run: |
           # Disable interactive setup-properties.sh and reset.sh in setup.sh
@@ -83,13 +86,13 @@ jobs:
           # Patch libvpx build function to skip unwanted variants
           sed -i '/configure_make() {/a \  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
 
-      # 7. Run Setup Script (Installs NDKs and builds native libraries)
+      # 8. Run Setup Script (Installs NDKs and builds native libraries)
       - name: Run Setup Script
         run: |
           chmod +x scripts/*.sh scripts/private/*.sh
-          yes | ./scripts/setup.sh
+          ./scripts/setup.sh --default-sdk-root
 
-      # 8. Build the APK
+      # 9. Build the APK
       - name: Build Universal Release APK
         run: |
           chmod +x gradlew

@@ -46,45 +46,55 @@ jobs:
           
           echo "Cloning critical submodules..."
           
+          # Function to clone or update a repo safely
+          clone_repo() {
+            local URL=$1
+            local DEST=$2
+            local BRANCH=$3
+            local EXTRA=$4
+            echo "Cloning $URL into $DEST..."
+            rm -rf "$DEST"
+            mkdir -p "$(dirname "$DEST")"
+            if [ -n "$BRANCH" ]; then
+              git clone --depth 1 -b "$BRANCH" $EXTRA "$URL" "$DEST"
+            else
+              git clone --depth 1 $EXTRA "$URL" "$DEST"
+            fi
+          }
+
           # TDLib (with recursion for OpenSSL)
-          rm -rf tdlib
-          git clone --recursive --depth 1 https://github.com/TGX-Android/tdlib tdlib
+          clone_repo "https://github.com/TGX-Android/tdlib" "tdlib" "" "--recursive"
           
           # Vkryl modules
-          mkdir -p vkryl
-          git clone --depth 1 https://github.com/TGX-Android/leveldb vkryl/leveldb
-          git clone --depth 1 https://github.com/TGX-Android/X-Core vkryl/core
-          git clone --depth 1 https://github.com/TGX-Android/tdlib-utils vkryl/td
-          git clone --depth 1 https://github.com/TGX-Android/X-Android vkryl/android
+          clone_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb"
+          clone_repo "https://github.com/TGX-Android/X-Core" "vkryl/core"
+          clone_repo "https://github.com/TGX-Android/tdlib-utils" "vkryl/td"
+          clone_repo "https://github.com/TGX-Android/X-Android" "vkryl/android"
           
           # Native libs
-          mkdir -p app/jni/third_party
-          git clone --depth 1 https://github.com/webmproject/libvpx app/jni/third_party/libvpx
-          git clone --depth 1 -b release/6.1 https://github.com/FFmpeg/FFmpeg app/jni/third_party/ffmpeg
-          git clone --depth 1 https://github.com/xiph/opus app/jni/third_party/opus
-          git clone --depth 1 https://github.com/xiph/flac app/jni/third_party/flac
-          git clone --depth 1 https://github.com/xiph/ogg app/jni/third_party/ogg
-          git clone --depth 1 https://github.com/xiph/opusfile app/jni/third_party/opusfile
-          git clone --depth 1 https://github.com/TGX-Android/jni-utils app/jni/third_party/jni-utils
-          git clone --depth 1 https://github.com/TGX-Android/rlottie app/jni/third_party/rlottie
+          clone_repo "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx"
+          clone_repo "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1"
+          clone_repo "https://github.com/xiph/opus" "app/jni/third_party/opus"
+          clone_repo "https://github.com/xiph/flac" "app/jni/third_party/flac"
+          clone_repo "https://github.com/xiph/ogg" "app/jni/third_party/ogg"
+          clone_repo "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile"
+          clone_repo "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils"
+          clone_repo "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie"
           
           # TgCalls and VoIP
-          git clone --depth 1 https://github.com/TGX-Android/tgcalls tgcalls
-          mkdir -p app/jni/tgvoip/third_party
-          git clone --depth 1 https://github.com/TGX-Android/tgcalls app/jni/tgvoip/third_party/tgcalls
-          git clone --depth 1 https://github.com/TGX-Android/libtgvoip app/jni/tgvoip/third_party/libtgvoip
+          clone_repo "https://github.com/TGX-Android/tgcalls" "tgcalls"
+          clone_repo "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls"
+          clone_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip"
           
           # Other thirdparty
-          mkdir -p thirdparty/androidx-media
-          git clone --depth 1 https://github.com/androidx/media thirdparty/androidx-media/legacy
+          clone_repo "https://github.com/androidx/media" "thirdparty/androidx-media/legacy"
           
           echo "Verifying OpenSSL header existence..."
           if [ -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
             echo "OK: opensslv.h found"
           else
             echo "FAIL: opensslv.h NOT FOUND in tdlib. Fetching manually..."
-            rm -rf tdlib/source/openssl
-            git clone --depth 1 -b OpenSSL_1_1_1-stable https://github.com/openssl/openssl tdlib/source/openssl
+            clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable"
           fi
           
           echo "Diagnostic: Top level structure"

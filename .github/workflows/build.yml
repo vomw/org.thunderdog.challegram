@@ -106,8 +106,8 @@ jobs:
           ensure_repo "app/jni/third_party/opusfile" "https://github.com/xiph/opusfile" "" ""
           
           # TgCalls
-          ensure_repo "tgcalls" "https://github.com/TGX-Android/tgcalls" "-b main" ""
-          ensure_repo "app/jni/tgvoip/third_party/tgcalls" "https://github.com/TGX-Android/tgcalls" "-b main" ""
+          ensure_repo "tgcalls" "https://github.com/TGX-Android/tgcalls" "-b production" ""
+          ensure_repo "app/jni/tgvoip/third_party/tgcalls" "https://github.com/TGX-Android/tgcalls" "-b production" ""
           
           # Verify OpenSSL again
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then

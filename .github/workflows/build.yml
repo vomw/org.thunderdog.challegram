@@ -16,26 +16,68 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the current repository (mirror/fork)
+      # 1. Checkout the current repository (WITHOUT submodules first to avoid automatic failures)
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: true
+          submodules: false
 
-      # 2. Ensure submodules are actually there
+      # 2. Manual Submodule Setup (Resilient Brute force clone)
+      # This step bypasses all Git submodule internal tracking issues by cloning directly.
       - name: Manual Submodule Setup
         run: |
-          git sparse-checkout disable || true
-          echo "Registering submodules..."
-          git submodule init
-          echo "Updating submodules..."
-          # Try updating submodules one by one to see where it fails
-          git submodule status | awk '{print $2}' | xargs -I {} sh -c 'echo "Updating {}..."; git submodule update --init --recursive --force --depth 1 {} || echo "Failed to update {}"'
+          echo "Unsetting actions/checkout extraheader..."
+          git config --global --unset-all http.https://github.com/.extraheader || true
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          echo "Final submodule status:"
-          git submodule status --recursive
-          echo "Checking third_party contents:"
+          echo "Parsing .gitmodules and cloning manually..."
+          # Extract path and url pairs from .gitmodules using a robust awk script
+          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules > submodule_map.txt
+          
+          while read -r SUB_PATH SUB_URL; do
+            # Trim potential whitespace or carriage returns
+            SUB_PATH=$(echo $SUB_PATH | xargs)
+            SUB_URL=$(echo $SUB_URL | xargs)
+            
+            if [ -z "$SUB_PATH" ] || [ -z "$SUB_URL" ]; then continue; fi
+            
+            echo "Processing $SUB_PATH from $SUB_URL..."
+            
+            # Skip chromium src as they require special handling
+            if [[ "$SUB_URL" == *"chromium/src"* ]]; then
+              echo "Skipping chromium src submodule $SUB_PATH"
+              continue
+            fi
+            
+            mkdir -p "$(dirname "$SUB_PATH")"
+            if [ ! -d "$SUB_PATH/.git" ]; then
+              echo "Cloning $SUB_URL into $SUB_PATH..."
+              rm -rf "$SUB_PATH"
+              # Try cloning with --depth 1 for speed and reliability
+              git clone --depth 1 "$SUB_URL" "$SUB_PATH" || (sleep 2 && git clone --depth 1 "$SUB_URL" "$SUB_PATH") || echo "FAILED to clone $SUB_URL"
+            fi
+          done < submodule_map.txt
+          
+          echo "Checking critical directories for Gradle configuration:"
+          for d in "vkryl/leveldb" "vkryl/core" "vkryl/td" "vkryl/android" "tdlib" "tgcalls"; do
+            if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
+              echo "WARNING: Critical directory $d is MISSING or EMPTY. Attempting direct clone..."
+              # Fallback URLs for common TGX dependencies if .gitmodules parsing failed
+              BASE_URL="https://github.com/TGX-Android"
+              case $d in
+                "vkryl/leveldb") git clone --depth 1 "$BASE_URL/leveldb" "$d" ;;
+                "vkryl/core") git clone --depth 1 "$BASE_URL/X-Core" "$d" ;;
+                "vkryl/td") git clone --depth 1 "$BASE_URL/tdlib-utils" "$d" ;;
+                "vkryl/android") git clone --depth 1 "$BASE_URL/X-Android" "$d" ;;
+                "tdlib") git clone --depth 1 "$BASE_URL/tdlib" "$d" ;;
+                "tgcalls") git clone --depth 1 "$BASE_URL/tgcalls" "$d" ;;
+              esac
+            fi
+          done
+          
+          echo "Final verification of third_party:"
           ls -F app/jni/third_party/ || true
 
       # 3. Setup Java 21
@@ -51,7 +93,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip
 
-      # 5. Pre-configure local.properties to avoid interactive setup
+      # 5. Pre-configure local.properties
       - name: Create local.properties
         run: |
           mkdir -p "${ANDROID_SDK_ROOT}"
@@ -65,36 +107,43 @@ jobs:
           echo "tgx.extension=none" >> local.properties
           echo "keystore.file=$(pwd)/keystore.properties" >> local.properties
           
-          # Create dummy google-services.json if missing
           if [ ! -f app/google-services.json ]; then
             echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
           fi
 
-      # 6. Setup Keystore (Debug Key)
+      # 6. Setup Keystore
       - name: Setup Keystore
         run: |
           keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          
           echo "keystore.file=$(pwd)/debug.keystore" > keystore.properties
           echo "keystore.password=android" >> keystore.properties
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 7. Patch build scripts to be non-interactive and faster
+      # 7. Definitively patch build scripts
       - name: Patch Build Scripts
         run: |
           # Fix typo in set-env.sh
           sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
-          # Disable interactive setup-properties.sh and reset.sh in setup.sh
-          sed -i '/if \[\[ -f local.properties \]\]; then/,/fi/d' scripts/setup.sh
-          sed -i '/setup-properties.sh/d' scripts/setup.sh
-          
-          # Make all implementation scripts non-fatal in setup.sh
-          sed -i 's/\.sh$/\.sh || true/' scripts/setup.sh
+          # Replace setup.sh with a CI-optimized version using a quoted heredoc
+          cat > scripts/setup.sh <<'EOF'
+          #!/bin/bash
+          set -e
+          echo "CI Setup starting..."
+          source "$(pwd)/scripts/setup-sdk.sh" "$@"
+          echo "Running implementation scripts..."
+          # We make these non-fatal to prevent workflow termination on native build errors
+          scripts/private/patch-opus-impl.sh || echo "Warning: patch-opus-impl.sh failed"
+          scripts/private/patch-androidx-media-impl.sh || echo "Warning: patch-androidx-media-impl.sh failed"
+          scripts/private/build-vpx-impl.sh || echo "Warning: build-vpx-impl.sh failed"
+          scripts/private/build-ffmpeg-impl.sh || echo "Warning: build-ffmpeg-impl.sh failed"
+          echo "CI Setup finished"
+          EOF
+          chmod +x scripts/setup.sh
           
           # Avoid broken pipe in setup-sdk.sh
-          sed -i 's/yes |/(yes 2>\/dev\/null || true) |/g' scripts/setup-sdk.sh
+          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
           sed -i '/function build_one {/a \  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
@@ -104,7 +153,7 @@ jobs:
       - name: Run Setup Script
         run: |
           chmod +x scripts/*.sh scripts/private/*.sh
-          ./scripts/setup.sh --default-sdk-root || echo "Setup script finished with errors, but continuing..."
+          ./scripts/setup.sh --default-sdk-root || echo "Setup script finished with errors, but continuing to Gradle build..."
 
       # 9. Build the APK
       - name: Build Universal Release APK
@@ -112,11 +161,10 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleLatestUniversalRelease --stacktrace
 
-      # 9. Upload Artifact
+      # 10. Upload Artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: TelegramX-Latest-Universal-Release
           path: app/build/outputs/apk/latest/universal/release/*.apk
           retention-days: 5
-      

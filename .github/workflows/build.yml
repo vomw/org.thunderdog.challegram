@@ -148,8 +148,6 @@ jobs:
       # 7. Patch and Run Setup Script
       - name: Run Setup Script
         run: |
-          chmod a+x -R scripts/
-          ls -l scripts/
           # Fix set-env.sh typo
           sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           

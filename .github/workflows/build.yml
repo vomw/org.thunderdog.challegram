@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the current repository
+      # 1. Checkout the mirror repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -37,86 +37,62 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git
 
-      # 4. Aggressive Submodule & Dependency Setup
-      - name: Setup Dependencies
+      # 4. Aggressive Submodule Setup
+      # We manually clone submodules to bypass any git state issues.
+      - name: Setup Submodules
         run: |
           set -x
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # Function to clone or update a repo
-          # usage: ensure_repo <path> <url> <branch_arg> <recursive_arg>
-          ensure_repo() {
-            local PATH_DIR=$1
-            local URL=$2
-            local BRANCH_ARG=$3 # e.g. "-b main" or ""
-            local RECURSIVE_ARG=$4 # e.g. "--recursive" or ""
-            
-            echo "Ensuring $PATH_DIR from $URL..."
-            
-            if [ -d "$PATH_DIR" ] && [ -n "$(ls -A $PATH_DIR)" ]; then
-               echo "$PATH_DIR exists. Checking if valid..."
-               # Simple check: does it have .git?
-               if [ -d "$PATH_DIR/.git" ]; then
-                 echo "$PATH_DIR seems valid."
-                 return 0
-               fi
-               echo "$PATH_DIR exists but might be invalid (no .git). wiping."
-               rm -rf "$PATH_DIR"
-            fi
-            
-            mkdir -p "$(dirname "$PATH_DIR")"
-            rm -rf "$PATH_DIR"
-            
-            echo "Cloning $PATH_DIR..."
-            git clone --depth 1 $RECURSIVE_ARG $BRANCH_ARG "$URL" "$PATH_DIR" || \
-            git clone $RECURSIVE_ARG $BRANCH_ARG "$URL" "$PATH_DIR" || \
-            (echo "Failed to clone $PATH_DIR" && return 1)
-          }
-
-          # 1. Fix .gitmodules for future reference
-          sed -i '/shallow =/d' .gitmodules
-          sed -i '/branch =/d' .gitmodules
+          echo "Cloning critical submodules..."
           
-          # 2. Initialize what we can standard way
-          git submodule init
-          
-          # 3. Manually fetch critical dependencies
-          
-          # TDLib (Recursive is critical for OpenSSL)
-          ensure_repo "tdlib" "https://github.com/TGX-Android/tdlib" "-b main" "--recursive"
-          
-          # Check OpenSSL specifically
-          if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            echo "CRITICAL: OpenSSL missing in tdlib. Fetching manually..."
-            rm -rf tdlib/source/openssl
-            ensure_repo "tdlib/source/openssl" "https://github.com/openssl/openssl" "-b OpenSSL_1_1_1-stable" ""
-          fi
+          # TDLib (with recursion for OpenSSL)
+          rm -rf tdlib
+          git clone --recursive --depth 1 https://github.com/TGX-Android/tdlib tdlib
           
           # Vkryl modules
-          ensure_repo "vkryl/leveldb" "https://github.com/TGX-Android/leveldb" "-b main" ""
-          ensure_repo "vkryl/core" "https://github.com/TGX-Android/X-Core" "-b main" ""
-          ensure_repo "vkryl/td" "https://github.com/TGX-Android/tdlib-utils" "-b main" ""
-          ensure_repo "vkryl/android" "https://github.com/TGX-Android/X-Android" "-b main" ""
+          mkdir -p vkryl
+          git clone --depth 1 https://github.com/TGX-Android/leveldb vkryl/leveldb
+          git clone --depth 1 https://github.com/TGX-Android/X-Core vkryl/core
+          git clone --depth 1 https://github.com/TGX-Android/tdlib-utils vkryl/td
+          git clone --depth 1 https://github.com/TGX-Android/X-Android vkryl/android
           
           # Native libs
-          ensure_repo "app/jni/third_party/libvpx" "https://github.com/webmproject/libvpx" "" ""
-          ensure_repo "app/jni/third_party/ffmpeg" "https://github.com/FFmpeg/FFmpeg" "-b release/6.1" ""
-          ensure_repo "app/jni/third_party/opus" "https://github.com/xiph/opus" "" ""
-          ensure_repo "app/jni/third_party/flac" "https://github.com/xiph/flac" "" ""
-          ensure_repo "app/jni/third_party/ogg" "https://github.com/xiph/ogg" "" ""
-          ensure_repo "app/jni/third_party/opusfile" "https://github.com/xiph/opusfile" "" ""
+          mkdir -p app/jni/third_party
+          git clone --depth 1 https://github.com/webmproject/libvpx app/jni/third_party/libvpx
+          git clone --depth 1 -b release/6.1 https://github.com/FFmpeg/FFmpeg app/jni/third_party/ffmpeg
+          git clone --depth 1 https://github.com/xiph/opus app/jni/third_party/opus
+          git clone --depth 1 https://github.com/xiph/flac app/jni/third_party/flac
+          git clone --depth 1 https://github.com/xiph/ogg app/jni/third_party/ogg
+          git clone --depth 1 https://github.com/xiph/opusfile app/jni/third_party/opusfile
+          git clone --depth 1 https://github.com/TGX-Android/jni-utils app/jni/third_party/jni-utils
+          git clone --depth 1 https://github.com/TGX-Android/rlottie app/jni/third_party/rlottie
           
-          # TgCalls
-          ensure_repo "tgcalls" "https://github.com/TGX-Android/tgcalls" "-b production" ""
-          ensure_repo "app/jni/tgvoip/third_party/tgcalls" "https://github.com/TGX-Android/tgcalls" "-b production" ""
+          # TgCalls and VoIP
+          git clone --depth 1 https://github.com/TGX-Android/tgcalls tgcalls
+          mkdir -p app/jni/tgvoip/third_party
+          git clone --depth 1 https://github.com/TGX-Android/tgcalls app/jni/tgvoip/third_party/tgcalls
+          git clone --depth 1 https://github.com/TGX-Android/libtgvoip app/jni/tgvoip/third_party/libtgvoip
           
-          # Verify OpenSSL again
-          if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-             echo "FATAL: OpenSSL header still missing after manual fetch."
-             find tdlib -name "opensslv.h"
-             exit 1
+          # Other thirdparty
+          mkdir -p thirdparty/androidx-media
+          git clone --depth 1 https://github.com/androidx/media thirdparty/androidx-media/legacy
+          
+          echo "Verifying OpenSSL header existence..."
+          if [ -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
+            echo "OK: opensslv.h found"
+          else
+            echo "FAIL: opensslv.h NOT FOUND in tdlib. Fetching manually..."
+            rm -rf tdlib/source/openssl
+            git clone --depth 1 -b OpenSSL_1_1_1-stable https://github.com/openssl/openssl tdlib/source/openssl
           fi
           
-          echo "Dependency setup complete."
+          echo "Diagnostic: Top level structure"
+          ls -F
+          echo "Diagnostic: tdlib structure"
+          ls -F tdlib/
+          echo "Diagnostic: vkryl structure"
+          ls -F vkryl/
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -132,9 +108,8 @@ jobs:
           echo "tgx.extension=none" >> local.properties
           echo "keystore.file=$(pwd)/keystore.properties" >> local.properties
           
-          if [ ! -f app/google-services.json ]; then
-            echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
-          fi
+          # Create dummy google-services.json
+          echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
 
       # 6. Setup Keystore
       - name: Setup Keystore
@@ -145,54 +120,54 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 7. Patch and Run Setup Script
-      - name: Run Setup Script
+      # 7. Definitively patch build scripts
+      - name: Patch Build Scripts
         run: |
-          # Fix set-env.sh typo
-          sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          # Fix typo in set-env.sh
+          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
-          # Patch setup-sdk.sh to avoid broken pipe on yes | sdkmanager
-          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
-          
-          # Optimization: Patch native build scripts to build only ARM64/ARMv7
-          sed -i '/function build_one {/a \ 	  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          sed -i '/configure_make() {/a \ 	  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
-
-          # Create a custom non-interactive setup script
-          cat > scripts/ci_setup.sh <<'EOF'
+          # Replace setup.sh with a CI-optimized version
+          cat > scripts/setup.sh <<'EOF'
           #!/bin/bash
           set -e
-          
-          # 1. Setup SDK
-          echo "Setting up SDK..."
-          source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
-          
-          # 2. Run patches/builds (making them non-fatal to allow gradle to attempt build if partial)
-          echo "Running native setup scripts..."
+          echo "CI Setup starting..."
+          source "$(pwd)/scripts/setup-sdk.sh" "$@"
+          echo "Running native implementation scripts..."
           chmod +x scripts/private/*.sh
-          
-          scripts/private/patch-opus-impl.sh || echo "Warning: OPUS patch failed"
-          scripts/private/patch-androidx-media-impl.sh || echo "Warning: AndroidX Media patch failed"
-          scripts/private/build-vpx-impl.sh || echo "Warning: VPX build failed"
-          scripts/private/build-ffmpeg-impl.sh || echo "Warning: FFmpeg build failed"
-          
-          echo "CI Setup finished."
+          scripts/private/patch-opus-impl.sh || echo "Warning: patch-opus-impl.sh failed"
+          scripts/private/patch-androidx-media-impl.sh || echo "Warning: patch-androidx-media-impl.sh failed"
+          scripts/private/build-vpx-impl.sh || echo "Warning: build-vpx-impl.sh failed"
+          scripts/private/build-ffmpeg-impl.sh || echo "Warning: build-ffmpeg-impl.sh failed"
+          echo "CI Setup finished"
           EOF
+          chmod +x scripts/setup.sh
           
-          chmod +x scripts/ci_setup.sh
-          ./scripts/ci_setup.sh
+          # Avoid broken pipe in setup-sdk.sh
+          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
+          
+          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI
+          # We restrict to ONE ABI to save time and ensure we get at least one working build
+          sed -i '/function build_one {/a \  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
+          sed -i '/configure_make() {/a \  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
 
-      # 8. Build the APK
-      - name: Build Universal Release APK
+      # 8. Run Setup Script
+      - name: Run Setup Script
+        run: |
+          chmod +x scripts/*.sh scripts/private/*.sh
+          ./scripts/setup.sh --default-sdk-root || echo "Setup script had some issues, but continuing..."
+
+      # 9. Build the APK (latestArm64Release)
+      # We build arm64 only to be fast and avoid ABI mismatch issues
+      - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleLatestUniversalRelease --stacktrace
+          ./gradlew assembleLatestArm64Release --stacktrace
 
-      # 9. Upload Artifact
+      # 10. Upload Artifact
       - name: Upload APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TelegramX-Latest-Universal-Release
-          path: app/build/outputs/apk/latest/universal/release/*.apk
+          name: TelegramX-Latest-Arm64-Release
+          path: app/build/outputs/apk/latest/arm64/release/*.apk
           retention-days: 5

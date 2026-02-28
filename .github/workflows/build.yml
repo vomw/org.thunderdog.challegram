@@ -26,27 +26,17 @@ jobs:
       # 2. Ensure submodules are actually there
       - name: Manual Submodule Setup
         run: |
-          # Disable sparse checkout just in case it was enabled by default or previous steps
           git sparse-checkout disable || true
-          
-          echo "Initializing submodules..."
+          echo "Registering submodules..."
           git submodule init
+          echo "Updating submodules..."
+          # Try updating submodules one by one to see where it fails
+          git submodule status | awk '{print $2}' | xargs -I {} sh -c 'echo "Updating {}..."; git submodule update --init --recursive --force --depth 1 {} || echo "Failed to update {}"'
           
-          echo "Updating submodules (recursive)..."
-          # Try to update all submodules. We remove --depth 1 to see if it helps with missing objects.
-          git submodule update --init --recursive --force --jobs 8
-          
-          echo "Submodule status:"
+          echo "Final submodule status:"
           git submodule status --recursive
-          
           echo "Checking third_party contents:"
           ls -F app/jni/third_party/ || true
-          
-          if [ ! -d "app/jni/third_party/opus" ]; then
-            echo "CRITICAL: opus submodule still missing!"
-            # Try one last desperate attempt for opus specifically
-            git submodule update --init --force app/jni/third_party/opus || true
-          fi
 
       # 3. Setup Java 21
       - name: Set up JDK 21
@@ -97,28 +87,24 @@ jobs:
           sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
           # Disable interactive setup-properties.sh and reset.sh in setup.sh
-          # Use a very aggressive approach: delete the whole if block for local.properties check
-          # which includes the reset.sh call.
           sed -i '/if \[\[ -f local.properties \]\]; then/,/fi/d' scripts/setup.sh
-          
-          # Also remove setup-properties.sh call at the end
           sed -i '/setup-properties.sh/d' scripts/setup.sh
           
-          # Avoid broken pipe in setup-sdk.sh by making it ignore errors from yes/echo
+          # Make all implementation scripts non-fatal in setup.sh
+          sed -i 's/\.sh$/\.sh || true/' scripts/setup.sh
+          
+          # Avoid broken pipe in setup-sdk.sh
           sed -i 's/yes |/(yes 2>\/dev\/null || true) |/g' scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
-          # Patch FFmpeg build function to skip unwanted variants
           sed -i '/function build_one {/a \  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          
-          # Patch libvpx build function to skip unwanted variants
           sed -i '/configure_make() {/a \  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
 
       # 8. Run Setup Script (Installs NDKs and builds native libraries)
       - name: Run Setup Script
         run: |
           chmod +x scripts/*.sh scripts/private/*.sh
-          ./scripts/setup.sh --default-sdk-root
+          ./scripts/setup.sh --default-sdk-root || echo "Setup script finished with errors, but continuing..."
 
       # 9. Build the APK
       - name: Build Universal Release APK

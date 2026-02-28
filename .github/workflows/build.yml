@@ -16,13 +16,13 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the repository
+      # 1. Checkout the mirror repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: true
-          submodules: false # We handle them manually for maximum reliability
+          submodules: false
 
       # 2. Setup Java 21
       - name: Set up JDK 21
@@ -41,48 +41,30 @@ jobs:
       - name: Setup Submodules
         run: |
           set -x
-          # Ensure git uses https for submodules to avoid SSH issues
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # Function to clone a repo safely, removing any existing directory first
           clone_repo() {
             local URL=$1
             local DEST=$2
             local BRANCH=$3
             local EXTRA=$4
-            
-            # Trim whitespace/CR
-            URL=$(echo "$URL" | xargs)
-            DEST=$(echo "$DEST" | xargs)
-            BRANCH=$(echo "$BRANCH" | xargs)
-            
+            URL=$(echo "$URL" | xargs); DEST=$(echo "$DEST" | xargs); BRANCH=$(echo "$BRANCH" | xargs)
             if [ -z "$URL" ] || [ -z "$DEST" ]; then return; fi
-            
             echo "Cloning $URL into $DEST..."
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
-            
-            # Use a longer timeout and retries for reliability
             local ARGS="--depth 1"
             if [ -n "$EXTRA" ]; then ARGS="$ARGS $EXTRA"; fi
             if [ -n "$BRANCH" ]; then ARGS="$ARGS -b $BRANCH"; fi
-            
             git clone $ARGS "$URL" "$DEST" || (sleep 5 && git clone $ARGS "$URL" "$DEST") || echo "FAILED to clone $URL"
           }
 
-          echo "Parsing .gitmodules and cloning all submodules..."
-          # Extract path and url from .gitmodules. 
-          # We use a robust way to match lines and handle potential spaces.
           grep -E "path =|url =" .gitmodules | sed 'N;s/\n/ /' | while read -r p_line u_line; do
             SUB_PATH=$(echo "$p_line" | awk -F'= ' '{print $2}')
             SUB_URL=$(echo "$u_line" | awk -F'= ' '{print $2}')
-            
-            # Skip problematic or extremely large chromium submodules if they fail
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
-              echo "Handling large submodule $SUB_PATH with care..."
               clone_repo "$SUB_URL" "$SUB_PATH"
             else
-              # Recursive clone for others, especially tdlib which has its own submodules
               if [[ "$SUB_PATH" == "tdlib" ]]; then
                 clone_repo "$SUB_URL" "$SUB_PATH" "" "--recursive"
               else
@@ -91,31 +73,17 @@ jobs:
             fi
           done
 
-          # 5. Critical Path Verification and Fallbacks
           echo "Verifying critical directories for Gradle..."
-          declare -A critical_dirs=(
-            ["tdlib"]="https://github.com/TGX-Android/tdlib"
-            ["tgcalls"]="https://github.com/TGX-Android/tgcalls"
-            ["vkkry/leveldb"]="https://github.com/TGX-Android/leveldb"
-            ["vkryl/core"]="https://github.com/TGX-Android/X-Core"
-            ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils"
-            ["vkryl/android"]="https://github.com/TGX-Android/X-Android"
-          )
-
+          declare -A critical_dirs=( ["tdlib"]="https://github.com/TGX-Android/tdlib" ["tgcalls"]="https://github.com/TGX-Android/tgcalls" ["vkryl/leveldb"]="https://github.com/TGX-Android/leveldb" ["vkryl/core"]="https://github.com/TGX-Android/X-Core" ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils" ["vkryl/android"]="https://github.com/TGX-Android/X-Android" )
           for d in "${!critical_dirs[@]}"; do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
-              echo "RECOVERY: $d is missing. Cloning from ${critical_dirs[$d]}..."
               clone_repo "${critical_dirs[$d]}" "$d" "" "$([[ "$d" == "tdlib" ]] && echo "--recursive")"
             fi
           done
 
-          # Final OpenSSL check inside tdlib
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            echo "RECOVERY: OpenSSL headers missing in tdlib. Fetching OpenSSL 1.1.1..."
             clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable"
           fi
-
-          echo "Final diagnostic of third_party:"
           ls -F app/jni/third_party/ || true
 
       # 5. Pre-configure local.properties
@@ -131,7 +99,6 @@ jobs:
           echo "app.sources_url=https://github.com/${{ github.repository }}" >> local.properties
           echo "tgx.extension=none" >> local.properties
           echo "keystore.file=$(pwd)/keystore.properties" >> local.properties
-          
           if [ ! -f app/google-services.json ]; then
             echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
           fi
@@ -148,38 +115,27 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
-          # Fix typo in scripts/set-env.sh
           sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
-          
-          # Avoid broken pipe in setup-sdk.sh
           sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
-          
-          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI for faster turnaround
           sed -i '/function build_one {/a \ 
   if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
           sed -i '/configure_make() {/a \ 
   if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
-
-          # Create a custom non-interactive setup script
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e
-          echo "CI Setup starting..."
           source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
-          echo "Running native setup scripts..."
           chmod +x scripts/private/*.sh
-          scripts/private/patch-opus-impl.sh || echo "Warning: patch-opus failed"
-          scripts/private/patch-androidx-media-impl.sh || echo "Warning: patch-androidx-media failed"
-          scripts/private/build-vpx-impl.sh || echo "Warning: build-vpx failed"
-          scripts/private/build-ffmpeg-impl.sh || echo "Warning: build-ffmpeg failed"
-          echo "CI Setup finished."
+          scripts/private/patch-opus-impl.sh || true
+          scripts/private/patch-androidx-media-impl.sh || true
+          scripts/private/build-vpx-impl.sh || true
+          scripts/private/build-ffmpeg-impl.sh || true
           EOF
           chmod +x scripts/ci_setup.sh
 
       # 8. Run Setup Script
       - name: Run Setup Script
-        run: |
-          ./scripts/ci_setup.sh || echo "Setup script finished with errors, but attempting Gradle build..."
+        run: ./scripts/ci_setup.sh || echo "Setup script finished with errors, but continuing..."
 
       # 9. Build the APK
       - name: Build Universal Release APK

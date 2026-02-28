@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the current repository (WITHOUT submodules first to avoid automatic failures)
+      # 1. Checkout the current repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -24,60 +24,72 @@ jobs:
           lfs: true
           submodules: false
 
-      # 2. Manual Submodule Setup (Resilient Brute force clone)
-      # This step bypasses all Git submodule internal tracking issues by cloning directly.
+      # 2. Manual Submodule Setup (Brute force clone with recursion and fallback)
       - name: Manual Submodule Setup
         run: |
-          echo "Unsetting actions/checkout extraheader..."
-          git config --global --unset-all http.https://github.com/.extraheader || true
-          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
+          set -x
+          echo "Cleaning up any failed submodule state..."
+          git submodule deinit -f . || true
+          rm -rf .git/modules
           
           echo "Parsing .gitmodules and cloning manually..."
-          # Extract path and url pairs from .gitmodules using a robust awk script
-          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules > submodule_map.txt
+          # Extract path and url pairs from .gitmodules
+          grep -E "path =|url =" .gitmodules | awk '{print $3}' | xargs -n2 echo > submodule_map.txt
           
           while read -r SUB_PATH SUB_URL; do
-            # Trim potential whitespace or carriage returns
-            SUB_PATH=$(echo $SUB_PATH | xargs)
-            SUB_URL=$(echo $SUB_URL | xargs)
-            
             if [ -z "$SUB_PATH" ] || [ -z "$SUB_URL" ]; then continue; fi
             
             echo "Processing $SUB_PATH from $SUB_URL..."
             
-            # Skip chromium src as they require special handling
+            # Skip chromium src as they are known to be problematic standalone and very large
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
-              echo "Skipping chromium src submodule $SUB_PATH"
+              echo "Skipping problematic chromium src submodule $SUB_PATH"
               continue
             fi
             
             mkdir -p "$(dirname "$SUB_PATH")"
             if [ ! -d "$SUB_PATH/.git" ]; then
-              echo "Cloning $SUB_URL into $SUB_PATH..."
+              echo "Cloning $SUB_URL into $SUB_PATH (recursive)..."
               rm -rf "$SUB_PATH"
-              # Try cloning with --depth 1 for speed and reliability
-              git clone --depth 1 "$SUB_URL" "$SUB_PATH" || (sleep 2 && git clone --depth 1 "$SUB_URL" "$SUB_PATH") || echo "FAILED to clone $SUB_URL"
+              # Try cloning. For tdlib we avoid --depth 1 to ensure sub-submodules work
+              if [[ "$SUB_PATH" == "tdlib" ]]; then
+                git clone --recursive "$SUB_URL" "$SUB_PATH" || echo "FAILED to clone $SUB_URL"
+              else
+                git clone --depth 1 --recursive "$SUB_URL" "$SUB_PATH" || \
+                git clone --recursive "$SUB_URL" "$SUB_PATH" || \
+                echo "FAILED to clone $SUB_URL"
+              fi
             fi
           done < submodule_map.txt
           
-          echo "Checking critical directories for Gradle configuration:"
+          echo "Debug: Checking critical dependencies"
           for d in "vkryl/leveldb" "vkryl/core" "vkryl/td" "vkryl/android" "tdlib" "tgcalls"; do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
-              echo "WARNING: Critical directory $d is MISSING or EMPTY. Attempting direct clone..."
-              # Fallback URLs for common TGX dependencies if .gitmodules parsing failed
-              BASE_URL="https://github.com/TGX-Android"
+              echo "!!! CRITICAL: $d is MISSING or EMPTY. Attempting manual fix..."
+              # Hardcoded fallbacks if parsing failed or clone failed
               case $d in
-                "vkryl/leveldb") git clone --depth 1 "$BASE_URL/leveldb" "$d" ;;
-                "vkryl/core") git clone --depth 1 "$BASE_URL/X-Core" "$d" ;;
-                "vkryl/td") git clone --depth 1 "$BASE_URL/tdlib-utils" "$d" ;;
-                "vkryl/android") git clone --depth 1 "$BASE_URL/X-Android" "$d" ;;
-                "tdlib") git clone --depth 1 "$BASE_URL/tdlib" "$d" ;;
-                "tgcalls") git clone --depth 1 "$BASE_URL/tgcalls" "$d" ;;
+                "tdlib") git clone --recursive https://github.com/TGX-Android/tdlib tdlib ;; 
+                "vkryl/leveldb") git clone --depth 1 https://github.com/TGX-Android/leveldb vkryl/leveldb ;; 
+                "vkryl/core") git clone --depth 1 https://github.com/TGX-Android/X-Core vkryl/core ;; 
+                "vkryl/td") git clone --depth 1 https://github.com/TGX-Android/tdlib-utils vkryl/td ;; 
+                "vkryl/android") git clone --depth 1 https://github.com/TGX-Android/X-Android vkryl/android ;; 
+                "tgcalls") git clone --depth 1 https://github.com/TGX-Android/tgcalls tgcalls ;; 
               esac
             fi
           done
           
-          echo "Final verification of third_party:"
+          # Special check for OpenSSL inside tdlib
+          if [ -d "tdlib" ] && [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
+            echo "OpenSSL missing in tdlib, attempting manual fetch..."
+            mkdir -p tdlib/source/openssl
+            git clone --depth 1 https://github.com/openssl/openssl -b OpenSSL_1_1_1-stable tdlib/source/openssl || \
+            git clone --depth 1 https://github.com/openssl/openssl tdlib/source/openssl
+          fi
+          
+          echo "Final check for opensslv.h:"
+          find tdlib -name "opensslv.h" || echo "opensslv.h STILL NOT FOUND"
+          
+          echo "Third party directory listing:"
           ls -F app/jni/third_party/ || true
 
       # 3. Setup Java 21
@@ -120,20 +132,19 @@ jobs:
           echo "key.alias=androiddebugkey" >> keystore.properties
           echo "key.password=android" >> keystore.properties
 
-      # 7. Definitively patch build scripts
+      # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
           # Fix typo in set-env.sh
-          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
-          # Replace setup.sh with a CI-optimized version using a quoted heredoc
+          # Replace setup.sh with a CI-optimized version
           cat > scripts/setup.sh <<'EOF'
           #!/bin/bash
           set -e
           echo "CI Setup starting..."
           source "$(pwd)/scripts/setup-sdk.sh" "$@"
           echo "Running implementation scripts..."
-          # We make these non-fatal to prevent workflow termination on native build errors
           scripts/private/patch-opus-impl.sh || echo "Warning: patch-opus-impl.sh failed"
           scripts/private/patch-androidx-media-impl.sh || echo "Warning: patch-androidx-media-impl.sh failed"
           scripts/private/build-vpx-impl.sh || echo "Warning: build-vpx-impl.sh failed"
@@ -146,14 +157,14 @@ jobs:
           sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
-          sed -i '/function build_one {/a \  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          sed -i '/configure_make() {/a \  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
+          sed -i '/function build_one {/a \ 	  if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" && "$PLATFORM" != "armv7-a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
+          sed -i '/configure_make() {/a \ 	  if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" && "$2" != "armeabi-v7a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
 
-      # 8. Run Setup Script (Installs NDKs and builds native libraries)
+      # 8. Run Setup Script
       - name: Run Setup Script
         run: |
           chmod +x scripts/*.sh scripts/private/*.sh
-          ./scripts/setup.sh --default-sdk-root || echo "Setup script finished with errors, but continuing to Gradle build..."
+          ./scripts/setup.sh --default-sdk-root || echo "Setup script had some issues, but continuing to build..."
 
       # 9. Build the APK
       - name: Build Universal Release APK
@@ -163,6 +174,7 @@ jobs:
 
       # 10. Upload Artifact
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: TelegramX-Latest-Universal-Release

@@ -20,26 +20,33 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
-          fetch-depth: 0 # Full history to ensure submodules are properly handled
+          fetch-depth: 0
           lfs: true
 
       # 2. Ensure submodules are actually there
-      - name: Force Sync Submodules
+      - name: Manual Submodule Setup
         run: |
-          git submodule sync --recursive
-          # Try to fix "opus" and others if they are missing
-          git submodule update --init --recursive --force --depth 1 || true
-          # If still missing, try deinit and update
-          if [ ! -d "app/jni/third_party/opus" ]; then
-            echo "Submodules missing, trying harder..."
-            git submodule deinit -f . || true
-            git submodule update --init --recursive --force --depth 1
-          fi
+          # Disable sparse checkout just in case it was enabled by default or previous steps
+          git sparse-checkout disable || true
+          
+          echo "Initializing submodules..."
+          git submodule init
+          
+          echo "Updating submodules (recursive)..."
+          # Try to update all submodules. We remove --depth 1 to see if it helps with missing objects.
+          git submodule update --init --recursive --force --jobs 8
+          
           echo "Submodule status:"
           git submodule status --recursive
+          
           echo "Checking third_party contents:"
           ls -F app/jni/third_party/ || true
+          
+          if [ ! -d "app/jni/third_party/opus" ]; then
+            echo "CRITICAL: opus submodule still missing!"
+            # Try one last desperate attempt for opus specifically
+            git submodule update --init --force app/jni/third_party/opus || true
+          fi
 
       # 3. Setup Java 21
       - name: Set up JDK 21
@@ -90,12 +97,15 @@ jobs:
           sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           
           # Disable interactive setup-properties.sh and reset.sh in setup.sh
-          # Use a very aggressive approach: delete the lines calling them
-          sed -i '/reset.sh/d' scripts/setup.sh
+          # Use a very aggressive approach: delete the whole if block for local.properties check
+          # which includes the reset.sh call.
+          sed -i '/if \[\[ -f local.properties \]\]; then/,/fi/d' scripts/setup.sh
+          
+          # Also remove setup-properties.sh call at the end
           sed -i '/setup-properties.sh/d' scripts/setup.sh
           
-          # Avoid broken pipe in setup-sdk.sh by replacing yes | with echo y | or similar
-          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
+          # Avoid broken pipe in setup-sdk.sh by making it ignore errors from yes/echo
+          sed -i 's/yes |/(yes 2>\/dev\/null || true) |/g' scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a', 'armeabi-v7a' ABIs
           # Patch FFmpeg build function to skip unwanted variants

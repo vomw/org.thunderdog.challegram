@@ -35,14 +35,14 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git
+          sudo apt-get install -y yasm wget unzip git awk
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
         run: |
           set -e
           set -x
-          git config --global url."https://github.com/ப்புகளை".insteadOf "git@github.com:" || true
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
           clone_repo() {
             local URL=$1
@@ -65,7 +65,7 @@ jobs:
           }
 
           # Parse .gitmodules and clone
-          grep -E "path =|url =" .gitmodules | sed 's/^[ \t]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL; do
+          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules | sed 's/\r//g' | while read -r SUB_PATH SUB_URL; do
             SUB_PATH=$(echo "$SUB_PATH" | xargs)
             SUB_URL=$(echo "$SUB_URL" | xargs)
             

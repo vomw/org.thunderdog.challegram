@@ -35,7 +35,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git awk
+          sudo apt-get install -y yasm wget unzip git
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
@@ -65,7 +65,8 @@ jobs:
           }
 
           # Parse .gitmodules and clone
-          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules | while read -r SUB_PATH SUB_URL; do
+          # Use a more robust regex to handle tabs and spaces
+          grep -E "path =|url =" .gitmodules | sed 's/^[ 	]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL;
             SUB_PATH=$(echo "$SUB_PATH" | xargs)
             SUB_URL=$(echo "$SUB_URL" | xargs)
             
@@ -145,10 +146,18 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
-          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
-          sed -i '/function build_one {/a if [[ "\$FLAVOR" != "latest" ]] || [[ "\$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for \$FLAVOR \$PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          sed -i '/configure_make() {/a if [[ "\$1" != "latest" ]] || [[ "\$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for \$1 \$2"; return 0; fi' scripts/private/build-vpx-impl.sh
+          
+          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI for faster turnaround
+          # We use a more robust way to inject the skip logic
+          
+          # For FFmpeg
+          sed -i '/function build_one {/a if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
+          
+          # For libvpx
+          sed -i '/configure_make() {/a if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
+          
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e

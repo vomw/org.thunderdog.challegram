@@ -35,7 +35,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git
+          sudo apt-get install -y yasm wget unzip git awk
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
@@ -48,32 +48,37 @@ jobs:
             local URL=$1
             local DEST=$2
             local BRANCH=$3
-            local EXTRA=$4
-            # Trim whitespace
+            local RECURSIVE=$4
+            
             URL=$(echo "$URL" | xargs); DEST=$(echo "$DEST" | xargs); BRANCH=$(echo "$BRANCH" | xargs)
             if [ -z "$URL" ] || [ -z "$DEST" ]; then return; fi
-            echo "Cloning $URL into $DEST..."
+            
+            echo "Cloning $URL into $DEST (recursive=$RECURSIVE)..."
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
+            
             local ARGS="--depth 1"
-            if [ -n "$EXTRA" ]; then ARGS="$ARGS $EXTRA"; fi
+            if [ "$RECURSIVE" = "true" ]; then ARGS="$ARGS --recursive"; fi
             if [ -n "$BRANCH" ]; then ARGS="$ARGS -b $BRANCH"; fi
-            git clone $ARGS "$URL" "$DEST" || (sleep 5 && git clone $ARGS "$URL" "$DEST") || echo "FAILED to clone $URL"
+            
+            git clone $ARGS "$URL" "$DEST" || (sleep 2 && git clone $ARGS "$URL" "$DEST") || echo "FAILED to clone $URL"
           }
 
-          # Parse .gitmodules more robustly
+          # Parse .gitmodules and clone
           awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules | while read -r SUB_PATH SUB_URL; do
             SUB_PATH=$(echo "$SUB_PATH" | xargs)
             SUB_URL=$(echo "$SUB_URL" | xargs)
             
+            # Use recursion for known repos that have their own submodules
+            RECURSIVE="false"
+            if [[ "$SUB_PATH" == "tdlib" ]] || [[ "$SUB_PATH" == "vkryl/leveldb" ]] || [[ "$SUB_PATH" == *"tgcalls"* ]]; then
+              RECURSIVE="true"
+            fi
+            
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
-              clone_repo "$SUB_URL" "$SUB_PATH"
+              clone_repo "$SUB_URL" "$SUB_PATH" "" "false"
             else
-              if [[ "$SUB_PATH" == "tdlib" ]]; then
-                clone_repo "$SUB_URL" "$SUB_PATH" "" "--recursive"
-              else
-                clone_repo "$SUB_URL" "$SUB_PATH"
-              fi
+              clone_repo "$SUB_URL" "$SUB_PATH" "" "$RECURSIVE"
             fi
           done
 
@@ -88,13 +93,27 @@ jobs:
           )
           for d in "${!critical_dirs[@]}"; do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
-              clone_repo "${critical_dirs[$d]}" "$d" "" "$([[ "$d" == "tdlib" ]] && echo "--recursive")"
+              RECURSIVE="false"
+              if [[ "$d" == "tdlib" ]] || [[ "$d" == "vkryl/leveldb" ]] || [[ "$d" == "tgcalls" ]]; then RECURSIVE="true"; fi
+              clone_repo "${critical_dirs[$d]}" "$d" "" "$RECURSIVE"
             fi
           done
 
+          # Ensure OpenSSL headers exist (TDLib dependency)
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable"
+            clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
+          
+          # Final sanity check for leveldb submodules
+          if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
+             echo "RECOVERY: leveldb internal submodule missing. Fetching..."
+             clone_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
+          fi
+          if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
+             echo "RECOVERY: leveldb jni-utils submodule missing. Fetching..."
+             clone_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "" "false"
+          fi
+
           ls -F app/jni/third_party/ || true
 
       # 5. Pre-configure local.properties

@@ -35,11 +35,12 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git awk
+          sudo apt-get install -y yasm wget unzip git
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
         run: |
+          set -e
           set -x
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
@@ -48,6 +49,7 @@ jobs:
             local DEST=$2
             local BRANCH=$3
             local EXTRA=$4
+            # Trim whitespace
             URL=$(echo "$URL" | xargs); DEST=$(echo "$DEST" | xargs); BRANCH=$(echo "$BRANCH" | xargs)
             if [ -z "$URL" ] || [ -z "$DEST" ]; then return; fi
             echo "Cloning $URL into $DEST..."
@@ -59,9 +61,11 @@ jobs:
             git clone $ARGS "$URL" "$DEST" || (sleep 5 && git clone $ARGS "$URL" "$DEST") || echo "FAILED to clone $URL"
           }
 
-          grep -E "path =|url =" .gitmodules | sed 'N;s/\n/ /' | while read -r p_line u_line; do
-            SUB_PATH=$(echo "$p_line" | awk -F'= ' '{print $2}')
-            SUB_URL=$(echo "$u_line" | awk -F'= ' '{print $2}')
+          # Parse .gitmodules more robustly
+          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules | while read -r SUB_PATH SUB_URL; do
+            SUB_PATH=$(echo "$SUB_PATH" | xargs)
+            SUB_URL=$(echo "$SUB_URL" | xargs)
+            
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
               clone_repo "$SUB_URL" "$SUB_PATH"
             else
@@ -73,8 +77,15 @@ jobs:
             fi
           done
 
-          echo "Verifying critical directories for Gradle..."
-          declare -A critical_dirs=( ["tdlib"]="https://github.com/TGX-Android/tdlib" ["tgcalls"]="https://github.com/TGX-Android/tgcalls" ["vkryl/leveldb"]="https://github.com/TGX-Android/leveldb" ["vkryl/core"]="https://github.com/TGX-Android/X-Core" ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils" ["vkryl/android"]="https://github.com/TGX-Android/X-Android" )
+          echo "Verifying and recovering critical directories..."
+          declare -A critical_dirs=(
+            ["tdlib"]="https://github.com/TGX-Android/tdlib"
+            ["tgcalls"]="https://github.com/TGX-Android/tgcalls"
+            ["vkryl/leveldb"]="https://github.com/TGX-Android/leveldb"
+            ["vkryl/core"]="https://github.com/TGX-Android/X-Core"
+            ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils"
+            ["vkryl/android"]="https://github.com/TGX-Android/X-Android"
+          )
           for d in "${!critical_dirs[@]}"; do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
               clone_repo "${critical_dirs[$d]}" "$d" "" "$([[ "$d" == "tdlib" ]] && echo "--recursive")"
@@ -115,12 +126,10 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
-          sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
           sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
-          sed -i '/function build_one {/a \ 
-          if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          sed -i '/configure_make() {/a \ 
-          if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
+          sed -i '/function build_one {/a if [[ "\$FLAVOR" != "latest" ]] || [[ "\$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for \$FLAVOR \$PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
+          sed -i '/configure_make() {/a if [[ "\$1" != "latest" ]] || [[ "\$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for \$1 \$2"; return 0; fi' scripts/private/build-vpx-impl.sh
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e

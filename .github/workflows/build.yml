@@ -42,7 +42,7 @@ jobs:
         run: |
           set -e
           set -x
-          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
+          git config --global url."https://github.com/ப்புகளை".insteadOf "git@github.com:" || true
           
           clone_repo() {
             local URL=$1
@@ -65,8 +65,7 @@ jobs:
           }
 
           # Parse .gitmodules and clone
-          # Use a more robust regex to handle tabs and spaces
-          grep -E "path =|url =" .gitmodules | sed 's/^[ 	]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL;
+          grep -E "path =|url =" .gitmodules | sed 's/^[ \t]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL; do
             SUB_PATH=$(echo "$SUB_PATH" | xargs)
             SUB_URL=$(echo "$SUB_URL" | xargs)
             
@@ -146,16 +145,14 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
+          # Fix set-env.sh typo: use ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT
           sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          
+          # Fix setup-sdk.sh broken pipe
           sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
           
-          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI for faster turnaround
-          # We use a more robust way to inject the skip logic
-          
-          # For FFmpeg
+          # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI
           sed -i '/function build_one {/a if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
-          
-          # For libvpx
           sed -i '/configure_make() {/a if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
           
           cat > scripts/ci_setup.sh <<'EOF'

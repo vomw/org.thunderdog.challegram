@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the mirror repository
+      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -35,14 +35,14 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git awk
+          sudo apt-get install -y yasm wget unzip git
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
         run: |
           set -e
           set -x
-          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
+          git config --global url."https://github.com/" --insteadOf "git@github.com:" || true
           
           clone_repo() {
             local URL=$1
@@ -65,16 +65,11 @@ jobs:
           }
 
           # Parse .gitmodules and clone
-          awk -F' = ' '/path =/ {p=$2} /url =/ {u=$2; if(p) print p, u; p=""}' .gitmodules | sed 's/\r//g' | while read -r SUB_PATH SUB_URL; do
-            SUB_PATH=$(echo "$SUB_PATH" | xargs)
-            SUB_URL=$(echo "$SUB_URL" | xargs)
-            
-            # Use recursion for known repos that have their own submodules
+          grep -E "path =|url =" .gitmodules | sed 's/^[ \t]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL
+          do
+            if [ -z "$SUB_PATH" ]; then continue; fi
             RECURSIVE="false"
-            if [[ "$SUB_PATH" == "tdlib" ]] || [[ "$SUB_PATH" == "vkryl/leveldb" ]] || [[ "$SUB_PATH" == *"tgcalls"* ]]; then
-              RECURSIVE="true"
-            fi
-            
+            if [[ "$SUB_PATH" == "tdlib" ]] || [[ "$SUB_PATH" == "vkryl/leveldb" ]] || [[ "$SUB_PATH" == *"tgcalls"* ]]; then RECURSIVE="true"; fi
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
               clone_repo "$SUB_URL" "$SUB_PATH" "" "false"
             else
@@ -82,7 +77,7 @@ jobs:
             fi
           done
 
-          echo "Verifying and recovering critical directories..."
+          echo "Verifying critical dependencies..."
           declare -A critical_dirs=(
             ["tdlib"]="https://github.com/TGX-Android/tdlib"
             ["tgcalls"]="https://github.com/TGX-Android/tgcalls"
@@ -91,7 +86,8 @@ jobs:
             ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils"
             ["vkryl/android"]="https://github.com/TGX-Android/X-Android"
           )
-          for d in "${!critical_dirs[@]}"; do
+          for d in "${!critical_dirs[@]}"
+          do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
               RECURSIVE="false"
               if [[ "$d" == "tdlib" ]] || [[ "$d" == "vkryl/leveldb" ]] || [[ "$d" == "tgcalls" ]]; then RECURSIVE="true"; fi
@@ -99,18 +95,14 @@ jobs:
             fi
           done
 
-          # Ensure OpenSSL headers exist (TDLib dependency)
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
             clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
           
-          # Final sanity check for leveldb submodules
           if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
-             echo "RECOVERY: leveldb internal submodule missing. Fetching..."
              clone_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
-             echo "RECOVERY: leveldb jni-utils submodule missing. Fetching..."
              clone_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "" "false"
           fi
 
@@ -145,11 +137,10 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
-          # Fix set-env.sh typo: use ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT
-          sed -i 's/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
-          
-          # Fix setup-sdk.sh broken pipe
-          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
+          # Use escaped dollar signs for shell variables in sed
+          # Triple escaping to ensure it reaches the runner as \
+          sed -i "s/ANDROID_SDK_ROOT=\\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\\$DEFAULT_ANDROID_SDK_ROOT/" scripts/set-env.sh
+          sed -i "s/yes |/echo y |/g" scripts/setup-sdk.sh
           
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI
           sed -i '/function build_one {/a if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh

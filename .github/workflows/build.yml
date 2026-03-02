@@ -42,7 +42,7 @@ jobs:
         run: |
           set -e
           set -x
-          git config --global url."https://github.com/" --insteadOf "git@github.com:" || true
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
           clone_repo() {
             local URL=$1
@@ -65,11 +65,15 @@ jobs:
           }
 
           # Parse .gitmodules and clone
-          grep -E "path =|url =" .gitmodules | sed 's/^[ \t]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL
-          do
+          grep -E "path =|url =" .gitmodules | sed 's/^[ \t]*//' | awk -F' = ' '{print $2}' | xargs -n2 echo | while read -r SUB_PATH SUB_URL; do
             if [ -z "$SUB_PATH" ]; then continue; fi
+
+            
             RECURSIVE="false"
-            if [[ "$SUB_PATH" == "tdlib" ]] || [[ "$SUB_PATH" == "vkryl/leveldb" ]] || [[ "$SUB_PATH" == *"tgcalls"* ]]; then RECURSIVE="true"; fi
+            if [[ "$SUB_PATH" == "tdlib" ]] || [[ "$SUB_PATH" == "vkryl/leveldb" ]] || [[ "$SUB_PATH" == *"tgcalls"* ]]; then
+              RECURSIVE="true"
+            fi
+            
             if [[ "$SUB_URL" == *"chromium/src"* ]]; then
               clone_repo "$SUB_URL" "$SUB_PATH" "" "false"
             else
@@ -86,8 +90,7 @@ jobs:
             ["vkryl/td"]="https://github.com/TGX-Android/tdlib-utils"
             ["vkryl/android"]="https://github.com/TGX-Android/X-Android"
           )
-          for d in "${!critical_dirs[@]}"
-          do
+          for d in "${!critical_dirs[@]}"; do
             if [ ! -d "$d" ] || [ -z "$(ls -A $d 2>/dev/null)" ]; then
               RECURSIVE="false"
               if [[ "$d" == "tdlib" ]] || [[ "$d" == "vkryl/leveldb" ]] || [[ "$d" == "tgcalls" ]]; then RECURSIVE="true"; fi
@@ -95,10 +98,12 @@ jobs:
             fi
           done
 
+          # OpenSSL headers check
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
             clone_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
           
+          # LevelDB internals check
           if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
              clone_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
           fi
@@ -137,16 +142,18 @@ jobs:
       # 7. Patch build scripts
       - name: Patch Build Scripts
         run: |
-          # Use escaped dollar signs for shell variables in sed
-          # Triple escaping to ensure it reaches the runner as \
-          sed -i "s/ANDROID_SDK_ROOT=\\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\\$DEFAULT_ANDROID_SDK_ROOT/" scripts/set-env.sh
-          sed -i "s/yes |/echo y |/g" scripts/setup-sdk.sh
-          
+          # Use a heredoc to create a patch script, avoiding YAML escaping issues
+          cat > patch_scripts.sh <<'EOF'
+          set -e
+          # Fix set-env.sh typo: use \$ to match literal $ in sed
+          sed -i 's/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK/ANDROID_SDK_ROOT=\$DEFAULT_ANDROID_SDK_ROOT/' scripts/set-env.sh
+          # Fix setup-sdk.sh broken pipe
+          sed -i 's/yes |/echo y |/g' scripts/setup-sdk.sh
           # Optimization: Build ONLY 'latest' flavor and 'arm64-v8a' ABI
           sed -i '/function build_one {/a if [[ "$FLAVOR" != "latest" ]] || [[ "$PLATFORM" != "arm64-v8a" ]]; then echo "Skipping FFmpeg build for $FLAVOR $PLATFORM"; return 0; fi' scripts/private/build-ffmpeg-impl.sh
           sed -i '/configure_make() {/a if [[ "$1" != "latest" ]] || [[ "$2" != "arm64-v8a" ]]; then echo "Skipping libvpx build for $1 $2"; return 0; fi' scripts/private/build-vpx-impl.sh
-          
-          cat > scripts/ci_setup.sh <<'EOF'
+          # Create ci_setup.sh
+          cat > scripts/ci_setup.sh <<'CI_EOF'
           #!/bin/bash
           set -e
           source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
@@ -155,8 +162,10 @@ jobs:
           scripts/private/patch-androidx-media-impl.sh || true
           scripts/private/build-vpx-impl.sh || true
           scripts/private/build-ffmpeg-impl.sh || true
-          EOF
+          CI_EOF
           chmod +x scripts/ci_setup.sh
+          EOF
+          bash patch_scripts.sh
 
       # 8. Run Setup Script
       - name: Run Setup Script

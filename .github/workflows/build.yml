@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the repository
+      # 1. Checkout the mirror repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -37,44 +37,68 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git python3
 
-      # 4. Robust Submodule Setup
+      # 4. Brute-force Submodule Setup
       - name: Setup Submodules
         run: |
-          # 1. Unset the interfering header from actions/checkout
+          set -e
           git config --global --unset-all http.https://github.com/.extraheader || true
           
-          # 2. Fix potential git state issues
-          git submodule deinit -f . || true
-          
-          # 3. Use standard update but with a retry and depth 1 for speed
-          echo "Updating submodules (attempt 1)..."
-          git submodule update --init --recursive --depth 1 || {
-            echo "Attempt 1 failed. Retrying without depth..."
-            git submodule update --init --recursive
-          } || {
-            echo "Standard update failed. Using manual fallback..."
-            # Manual fallback for the most critical ones if needed
-            # For now, let's trust standard update more if header is unset
+          # Function to safely clone a repo
+          safe_clone() {
+            local URL=$1
+            local DEST=$2
+            local BRANCH=$3
+            local RECURSIVE=$4
+            echo "Ensuring $DEST from $URL..."
+            rm -rf "$DEST"
+            mkdir -p "$(dirname "$DEST")"
+            local OPTS="--depth 1"
+            if [ "$RECURSIVE" == "true" ]; then OPTS="$OPTS --recursive"; fi
+            if [ -n "$BRANCH" ]; then OPTS="$OPTS -b $BRANCH"; fi
+            git clone $OPTS "$URL" "$DEST" || git clone "$URL" "$DEST"
           }
+
+          echo "Cloning core dependencies..."
+          safe_clone "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
+          safe_clone "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true"
           
-          # 4. Critical manual checks
+          mkdir -p vkryl
+          safe_clone "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
+          safe_clone "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
+          safe_clone "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
+          safe_clone "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
+          
+          echo "Cloning native dependencies..."
+          mkdir -p app/jni/third_party
+          safe_clone "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "" "false"
+          safe_clone "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1" "false"
+          safe_clone "https://github.com/xiph/opus" "app/jni/third_party/opus" "" "false"
+          safe_clone "https://github.com/xiph/flac" "app/jni/third_party/flac" "" "false"
+          safe_clone "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "" "false"
+          safe_clone "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "" "false"
+          safe_clone "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
+          safe_clone "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
+          safe_clone "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
+          safe_clone "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
+          safe_clone "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
+          
+          mkdir -p thirdparty/androidx-media
+          safe_clone "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
+          safe_clone "https://github.com/androidx/media" "app/jni/third_party/androidx-media" "release" "false"
+
+          echo "Fixing internal submodules..."
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            echo "OpenSSL headers missing. Fetching manually..."
-            rm -rf tdlib/source/openssl
-            git clone --depth 1 -b OpenSSL_1_1_1-stable https://github.com/openssl/openssl tdlib/source/openssl
+            safe_clone "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
-          
-          # 5. Fix vkryl/leveldb internals (common issue)
           if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
-            echo "LevelDB internal submodule missing. Fetching..."
-            rm -rf vkryl/leveldb/jni/leveldb
-            git clone --depth 1 https://github.com/google/leveldb vkryl/leveldb/jni/leveldb
+            safe_clone "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
-            echo "jni-utils submodule missing in leveldb. Fetching..."
-            rm -rf vkryl/leveldb/jni/jni-utils
-            git clone --depth 1 https://github.com/TGX-Android/jni-utils vkryl/leveldb/jni/jni-utils
+            safe_clone "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
+
+          echo "Final check of vkryl/android:"
+          ls -R vkryl/android | head -n 10
 
       # 5. Pre-configure local.properties
       - name: Create local.properties

@@ -87,7 +87,6 @@ open class ModulePlugin : Plugin<Project> {
               "-Xlint:-overrides",
               "-Xlint:-this-escape",
 
-              // TODO: fix deprecation warnings by migrating to newer APIs.
               "-Xlint:-deprecation",
             ))
           }
@@ -99,84 +98,75 @@ open class ModulePlugin : Plugin<Project> {
           multiDexEnabled = true
         }
 
-        when (this) {
-          is LibraryExtension -> {
-            defaultConfig {
-              consumerProguardFiles("consumer-rules.pro")
-            }
-            flavorDimensions += "SDK"
-            productFlavors {
-              Sdk.VARIANTS.forEach { (_, variant) ->
-                register(variant.flavor) {
-                  dimension = "SDK"
-                  externalNativeBuild.cmake.arguments(
-                    "-DANDROID_PLATFORM=android-${variant.minSdk}",
-                    "-DTGX_FLAVOR=${variant.flavor}"
-                  )
-                }
+        if (this is LibraryExtension) {
+          flavorDimensions += "SDK"
+          productFlavors {
+            Sdk.VARIANTS.forEach { (_, variant) ->
+              create(variant.flavor) {
+                dimension = "SDK"
+                externalNativeBuild.cmake.arguments(
+                  "-DANDROID_PLATFORM=android-${variant.minSdk}",
+                  "-DTGX_FLAVOR=${variant.flavor}"
+                )
               }
             }
           }
+          defaultConfig {
+            consumerProguardFiles("consumer-rules.pro")
+          }
+        }
 
-          is AppExtension -> {
-            config?.keystore?.let { keystore ->
-              signingConfigs {
-                arrayOf(
-                  getByName("debug"),
-                  maybeCreate("release")
-                ).forEach { config ->
-                  config.storeFile = keystore.file
-                  config.storePassword = keystore.password
-                  config.keyAlias = keystore.keyAlias
-                  config.keyPassword = keystore.keyPassword
-                  config.enableV2Signing = true
-                }
+        if (this is AppExtension) {
+          config?.keystore?.let { keystore ->
+            signingConfigs {
+              arrayOf(
+                getByName("debug"),
+                maybeCreate("release")
+              ).forEach { config ->
+                config.storeFile = keystore.file
+                config.storePassword = keystore.password
+                config.keyAlias = keystore.keyAlias
+                config.keyPassword = keystore.keyPassword
+                config.enableV2Signing = true
               }
+            }
 
-              buildTypes {
-                getByName("debug") {
-                  signingConfig = signingConfigs["debug"]
-
-                  isDebuggable = true
-                  isJniDebuggable = true
-                  isMinifyEnabled = false
-
-                  ndk.debugSymbolLevel = "full"
-
-                  if (config.forceOptimize) {
-                    proguardFiles(
-                      getDefaultProguardFile(ProguardFiles.ProguardFile.OPTIMIZE.fileName),
-                      "proguard-rules.pro"
-                    )
-                    if (config.isHuaweiBuild) {
-                      proguardFile("proguard-hms.pro")
-                    }
-                  }
-                }
-
-                getByName("release") {
-                  signingConfig = signingConfigs["release"]
-
-                  isMinifyEnabled = !config.doNotObfuscate
-                  isShrinkResources = !config.doNotObfuscate
-
-                  ndk.debugSymbolLevel = "full"
-
+            buildTypes {
+              getByName("debug") {
+                signingConfig = signingConfigs["debug"]
+                isDebuggable = true
+                isJniDebuggable = true
+                isMinifyEnabled = false
+                ndk.debugSymbolLevel = "full"
+                if (config.forceOptimize) {
                   proguardFiles(
                     getDefaultProguardFile(ProguardFiles.ProguardFile.OPTIMIZE.fileName),
                     "proguard-rules.pro"
                   )
-
                   if (config.isHuaweiBuild) {
                     proguardFile("proguard-hms.pro")
                   }
                 }
               }
-            }
 
-            project.dependencies {
-              add("implementation", libs.androidx.multidex)
+              getByName("release") {
+                signingConfig = signingConfigs["release"]
+                isMinifyEnabled = !config.doNotObfuscate
+                isShrinkResources = !config.doNotObfuscate
+                ndk.debugSymbolLevel = "full"
+                proguardFiles(
+                  getDefaultProguardFile(ProguardFiles.ProguardFile.OPTIMIZE.fileName),
+                  "proguard-rules.pro"
+                )
+                if (config.isHuaweiBuild) {
+                  proguardFile("proguard-hms.pro")
+                }
+              }
             }
+          }
+
+          project.dependencies {
+            add("implementation", libs.androidx.multidex)
           }
         }
       }

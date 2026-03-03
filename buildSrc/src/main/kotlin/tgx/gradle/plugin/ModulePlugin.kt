@@ -77,16 +77,13 @@ open class ModulePlugin : Plugin<Project> {
             options.compilerArgs.addAll(listOf(
               "-Xmaxerrs", "2000",
               "-Xmaxwarns", "2000",
-
               "-Xlint:all",
               "-Xlint:unchecked",
-
               "-Xlint:-serial",
               "-Xlint:-lossy-conversions",
               "-Xlint:-overloads",
               "-Xlint:-overrides",
               "-Xlint:-this-escape",
-
               "-Xlint:-deprecation",
             ))
           }
@@ -99,7 +96,7 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
-          flavorDimensions += "SDK"
+          flavorDimensions.add("SDK")
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
               create(variant.flavor) {

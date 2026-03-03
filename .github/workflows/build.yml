@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the mirror repository
+      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -91,11 +91,9 @@ jobs:
           
           echo "Cloning WebRTC for tgcalls..."
           mkdir -p app/jni/tgvoip/third_party
-          # WebRTC default branch is 'telegram' in TGX fork
           ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
           ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
-          # Sync WebRTC to thirdparty folder as expected by tgcalls/build.gradle.kts
           mkdir -p thirdparty/WebRTC
           if [ -d "app/jni/tgvoip/third_party/webrtc/src" ]; then
             cp -r app/jni/tgvoip/third_party/webrtc/src thirdparty/WebRTC/
@@ -116,13 +114,10 @@ jobs:
             ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
-          echo "Diagnostic: Final check of critical paths"
-          ls -d vkryl/android || echo "vkryl/android MISSING"
-          ls -d tgcalls || echo "tgcalls MISSING"
-          ls -d app/jni/tgvoip/third_party/webrtc || echo "webrtc MISSING"
-          
-          echo "Debug: Listing build.gradle.kts files"
-          find . -maxdepth 4 -name "build.gradle.kts"
+          echo "Diagnostic: Printing build.gradle.kts contents"
+          cat tgcalls/build.gradle.kts
+          cat tdlib/build.gradle.kts
+          cat vkryl/android/build.gradle.kts
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -164,11 +159,9 @@ jobs:
                   with open(path, "w") as f: f.write(content.replace(search, replace))
                   print(f"Patched {path}")
 
-          # Fix typos and pipe issues
           patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
           patch_file("scripts/setup-sdk.sh", "yes |", "echo y |")
           
-          # Inject skip logic for non-ARM64/Latest
           def inject_skip(path, marker, skip_line):
               if not os.path.exists(path): return
               with open(path, "r") as f: lines = f.readlines()
@@ -180,10 +173,19 @@ jobs:
           inject_skip("scripts/private/build-ffmpeg-impl.sh", "function build_one {", "  if [[ \"$FLAVOR\" != \"latest\" ]] || [[ \"$PLATFORM\" != \"arm64-v8a\" ]]; then return 0; fi")
           inject_skip("scripts/private/build-vpx-impl.sh", "configure_make() {", "  if [[ \"$1\" != \"latest\" ]] || [[ \"$2\" != \"arm64-v8a\" ]]; then return 0; fi")
           
-          # Fix libyuv missing file in BuildYuv.cmake
           patch_file("app/jni/BuildYuv.cmake", "\"${YUV_DIR}/source/compare_msa.cc\"", "# missing mips file")
           
-          # NO missingDimensionStrategy patch - it might be causing the "No variants exist" error
+          # Fix missing ABI dimension issue in app/build.gradle.kts
+          app_gradle = "app/build.gradle.kts"
+          if os.path.exists(app_gradle):
+              with open(app_gradle, "r") as f: content = f.read()
+              if "missingDimensionStrategy" not in content:
+                  if "defaultConfig {" in content:
+                      # We must use correct dimension name. In ModulePlugin it is "SDK"
+                      # But here we are dealing with ABI mismatch.
+                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"SDK\", \"latest\")")
+                      with open(app_gradle, "w") as f: f.write(content)
+                      print("Added missingDimensionStrategy to app/build.gradle.kts")
           '
           
           cat > scripts/ci_setup.sh <<'EOF'
@@ -209,8 +211,8 @@ jobs:
       - name: Build APK
         run: |
           chmod +x gradlew
-          # Debug variants
           ./gradlew :tgcalls:outgoingVariants || true
+          ./gradlew :vkryl:android:outgoingVariants || true
           ./gradlew assembleLatestArm64Release --stacktrace
 
       # 10. Upload Artifact

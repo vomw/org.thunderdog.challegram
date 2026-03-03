@@ -50,6 +50,7 @@ open class ModulePlugin : Plugin<Project> {
     }
 
     val androidExt = project.extensions.getByName("android")
+    println("ModulePlugin: Applying to ${project.path}, extension type: ${androidExt.javaClass.name}")
     if (androidExt is BaseExtension) {
       androidExt.apply {
         compileSdkVersion(compileSdkVersion)
@@ -99,25 +100,27 @@ open class ModulePlugin : Plugin<Project> {
           multiDexEnabled = true
         }
 
-        when (this) {
-          is LibraryExtension -> {
-            defaultConfig {
-              consumerProguardFiles("consumer-rules.pro")
-            }
-            flavorDimensions += "SDK"
-            productFlavors {
-              Sdk.VARIANTS.forEach { (_, variant) ->
-                register(variant.flavor) {
-                  externalNativeBuild.cmake.arguments(
-                    "-DANDROID_PLATFORM=android-${variant.minSdk}",
-                    "-DTGX_FLAVOR=${variant.flavor}"
-                  )
-                }
+        println("ModulePlugin: Checking extension type for ${project.path}")
+        if (this is LibraryExtension) {
+          println("ModulePlugin: ${project.path} IS LibraryExtension")
+          defaultConfig {
+            consumerProguardFiles("consumer-rules.pro")
+          }
+          flavorDimensions += "SDK"
+          productFlavors {
+            Sdk.VARIANTS.forEach { (_, variant) ->
+              println("ModulePlugin: Registering flavor ${variant.flavor} for ${project.path}")
+              register(variant.flavor) {
+                dimension = "SDK"
+                externalNativeBuild.cmake.arguments(
+                  "-DANDROID_PLATFORM=android-${variant.minSdk}",
+                  "-DTGX_FLAVOR=${variant.flavor}"
+                )
               }
             }
           }
-
-          is AppExtension -> {
+        } else if (this is AppExtension) {
+          println("ModulePlugin: ${project.path} IS AppExtension")
             config?.keystore?.let { keystore ->
               signingConfigs {
                 arrayOf(

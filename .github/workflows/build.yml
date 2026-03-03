@@ -41,13 +41,12 @@ jobs:
       - name: Setup Submodules
         run: |
           set -e
-          set -x
           
           # Remove interfering header
           git config --global --unset-all http.https://github.com/.extraheader || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # Function to clone a repo safely with retries and fallback to default branch
+          # Function to clone a repo safely
           ensure_repo() {
             local URL=$1
             local DEST=$2
@@ -58,29 +57,27 @@ jobs:
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
             
-            # Attempt 1: Specified branch, depth 1
             local ARGS="--depth 1"
             if [ "$RECURSIVE" == "true" ]; then ARGS="$ARGS --recursive"; fi
             
+            # Try with branch first if specified
             if [ -n "$BRANCH" ]; then
-              echo "Attempting clone with branch $BRANCH..."
               if git clone $ARGS -b "$BRANCH" "$URL" "$DEST"; then return 0; fi
-              echo "Branch $BRANCH failed. Retrying with default branch..."
-              rm -rf "$DEST"
+              echo "Branch $BRANCH failed, trying default branch..."
             fi
             
-            # Attempt 2: Default branch, depth 1
+            # Try default branch
             if git clone $ARGS "$URL" "$DEST"; then return 0; fi
             
-            # Attempt 3: Full clone
-            echo "Depth 1 failed. Attempting full clone..."
+            # Full clone fallback
+            echo "Shallow clone failed, trying full clone..."
             rm -rf "$DEST"
             git clone "$URL" "$DEST"
           }
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true"
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "" "true"
           
           mkdir -p vkryl
           ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
@@ -126,14 +123,6 @@ jobs:
           if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
             ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
-
-          echo "Diagnostic: Final check of critical paths"
-          ls -d vkryl/android || echo "vkryl/android MISSING"
-          ls -d tgcalls || echo "tgcalls MISSING"
-          ls -d app/jni/tgvoip/third_party/webrtc || echo "webrtc MISSING"
-          
-          echo "Debug: Listing build.gradle.kts files"
-          find . -maxdepth 4 -name "build.gradle.kts"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -229,7 +218,6 @@ jobs:
       - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew :tgcalls:outgoingVariants || true
           ./gradlew assembleLatestArm64Release --stacktrace
 
       # 10. Upload Artifact

@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the mirror repository
+      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -37,11 +37,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git python3
 
-      # 4. Brute-force Submodule Setup
+      # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
         run: |
           set -e
+          set -x
+          # Unset interfering headers
           git config --global --unset-all http.https://github.com/.extraheader || true
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
           # Function to safely clone a repo
           safe_clone() {
@@ -55,18 +58,20 @@ jobs:
             local OPTS="--depth 1"
             if [ "$RECURSIVE" == "true" ]; then OPTS="$OPTS --recursive"; fi
             if [ -n "$BRANCH" ]; then OPTS="$OPTS -b $BRANCH"; fi
-            git clone $OPTS "$URL" "$DEST" || git clone "$URL" "$DEST"
+            git clone $OPTS "$URL" "$DEST" || git clone "$URL" "$DEST" || echo "Warning: Failed to clone $DEST"
           }
 
-          echo "Cloning core dependencies..."
-          safe_clone "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          safe_clone "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true"
+          echo "Wiping and re-cloning core dependencies to avoid gitlink issues..."
+          rm -rf tdlib tgcalls vkryl thirdparty
+          
+          safe_clone "https://github.com/TGX-Android/tdlib" "tdlib" "" "true"
+          safe_clone "https://github.com/TGX-Android/tgcalls" "tgcalls" "" "true"
           
           mkdir -p vkryl
-          safe_clone "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
-          safe_clone "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
-          safe_clone "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
-          safe_clone "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
+          safe_clone "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "" "true"
+          safe_clone "https://github.com/TGX-Android/X-Core" "vkryl/core" "" "false"
+          safe_clone "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "" "false"
+          safe_clone "https://github.com/TGX-Android/X-Android" "vkryl/android" "" "false"
           
           echo "Cloning native dependencies..."
           mkdir -p app/jni/third_party
@@ -81,6 +86,13 @@ jobs:
           safe_clone "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
           safe_clone "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
           safe_clone "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
+          
+          echo "Cloning WebRTC for tgcalls..."
+          mkdir -p app/jni/tgvoip/third_party
+          safe_clone "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "main" "true"
+          safe_clone "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
+          mkdir -p thirdparty/WebRTC
+          cp -r app/jni/tgvoip/third_party/webrtc/src thirdparty/WebRTC/src || true
           
           mkdir -p thirdparty/androidx-media
           safe_clone "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
@@ -97,8 +109,10 @@ jobs:
             safe_clone "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
-          echo "Final check of vkryl/android:"
-          ls -R vkryl/android | head -n 10
+          echo "Diagnostic: Final check of critical paths"
+          ls -d vkryl/android || echo "vkryl/android MISSING"
+          ls -d tgcalls || echo "tgcalls MISSING"
+          ls -d app/jni/tgvoip/third_party/webrtc || echo "webrtc MISSING"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties

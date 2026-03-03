@@ -21,6 +21,8 @@ import java.io.File
 
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
+    project.logger.lifecycle("ModulePlugin: Applying to ${project.path}")
+    
     var compileSdkVersion: Int
     var buildToolsVersion: String
     var legacyNdkVersion: String
@@ -96,9 +98,11 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
+          project.logger.lifecycle("ModulePlugin: Configuring LibraryExtension for ${project.path}")
           flavorDimensions.add("SDK")
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
+              project.logger.lifecycle("ModulePlugin: Registering flavor ${variant.flavor} for ${project.path}")
               create(variant.flavor) {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
@@ -114,6 +118,7 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is AppExtension) {
+          project.logger.lifecycle("ModulePlugin: Configuring AppExtension for ${project.path}")
           config?.keystore?.let { keystore ->
             signingConfigs {
               arrayOf(

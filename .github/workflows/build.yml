@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the mirror repository
+      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -41,53 +41,58 @@ jobs:
       - name: Setup Submodules
         run: |
           set -e
-          # Unset interfering header
+          set -x
+          
+          # Remove interfering header
           git config --global --unset-all http.https://github.com/.extraheader || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
           # Function to clone a repo safely
-          safe_clone() {
+          ensure_repo() {
             local URL=$1
             local DEST=$2
             local BRANCH=$3
             local RECURSIVE=$4
-            echo "Ensuring $DEST from $URL..."
+            
+            echo "Ensuring $DEST from $URL (branch=$BRANCH, recursive=$RECURSIVE)..."
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
-            local OPTS="--depth 1"
-            if [ "$RECURSIVE" == "true" ]; then OPTS="$OPTS --recursive"; fi
-            if [ -n "$BRANCH" ]; then OPTS="$OPTS -b $BRANCH"; fi
-            git clone $OPTS "$URL" "$DEST" || git clone "$URL" "$DEST"
+            
+            local ARGS="--depth 1"
+            if [ "$RECURSIVE" == "true" ]; then ARGS="$ARGS --recursive"; fi
+            if [ -n "$BRANCH" ]; then ARGS="$ARGS -b $BRANCH"; fi
+            
+            git clone $ARGS "$URL" "$DEST" || git clone "$URL" "$DEST" || (sleep 2 && git clone "$URL" "$DEST") || echo "FAILED to clone $URL"
           }
 
           echo "Cloning core dependencies..."
-          safe_clone "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          safe_clone "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
+          ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
           
           mkdir -p vkryl
-          safe_clone "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
-          safe_clone "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
-          safe_clone "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
-          safe_clone "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
+          ensure_repo "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
           
           echo "Cloning native dependencies..."
           mkdir -p app/jni/third_party
-          safe_clone "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "" "false"
-          safe_clone "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1" "false"
-          safe_clone "https://github.com/xiph/opus" "app/jni/third_party/opus" "" "false"
-          safe_clone "https://github.com/xiph/flac" "app/jni/third_party/flac" "" "false"
-          safe_clone "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "" "false"
-          safe_clone "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "" "false"
-          safe_clone "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
-          safe_clone "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
-          safe_clone "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
-          safe_clone "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
-          safe_clone "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
+          ensure_repo "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "" "false"
+          ensure_repo "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1" "false"
+          ensure_repo "https://github.com/xiph/opus" "app/jni/third_party/opus" "" "false"
+          ensure_repo "https://github.com/xiph/flac" "app/jni/third_party/flac" "" "false"
+          ensure_repo "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "" "false"
+          ensure_repo "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "" "false"
+          ensure_repo "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
+          ensure_repo "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
+          ensure_repo "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
+          ensure_repo "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
           
           echo "Cloning WebRTC for tgcalls..."
           mkdir -p app/jni/tgvoip/third_party
-          safe_clone "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
-          safe_clone "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
+          ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
+          ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
           mkdir -p thirdparty/WebRTC
           if [ -d "app/jni/tgvoip/third_party/webrtc/src" ]; then
@@ -95,18 +100,18 @@ jobs:
           fi
           
           mkdir -p thirdparty/androidx-media
-          safe_clone "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
-          safe_clone "https://github.com/androidx/media" "app/jni/third_party/androidx-media" "release" "false"
+          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
+          ensure_repo "https://github.com/androidx/media" "app/jni/third_party/androidx-media" "release" "false"
 
           echo "Fixing internal submodules..."
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            safe_clone "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
+            ensure_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
-            safe_clone "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
+            ensure_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
-            safe_clone "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
+            ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
       # 5. Pre-configure local.properties
@@ -174,7 +179,9 @@ jobs:
               with open(app_gradle, "r") as f: content = f.read()
               if "missingDimensionStrategy" not in content:
                   if "defaultConfig {" in content:
-                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"SDK\", \"latest\")")
+                      # Consumer (app) has ABI, Producer (libs) is missing it.
+                      # We must tell consumer what to do when ABI is missing.
+                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"ABI\", \"universal\")")
                       with open(app_gradle, "w") as f: f.write(content)
                       print("Added missingDimensionStrategy to app/build.gradle.kts")
           '
@@ -182,12 +189,15 @@ jobs:
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e
+          echo "CI Setup starting..."
           source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
+          echo "Running native setup scripts..."
           chmod +x scripts/private/*.sh
           scripts/private/patch-opus-impl.sh || true
           scripts/private/patch-androidx-media-impl.sh || true
           scripts/private/build-vpx-impl.sh || true
           scripts/private/build-ffmpeg-impl.sh || true
+          echo "CI Setup finished."
           EOF
           chmod +x scripts/ci_setup.sh
 

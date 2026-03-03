@@ -16,7 +16,7 @@ jobs:
       ANDROID_SDK_ROOT: /home/runner/android-sdk
 
     steps:
-      # 1. Checkout the mirror repository
+      # 1. Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -46,14 +46,14 @@ jobs:
           # Remove interfering header
           git config --global --unset-all http.https://github.com/.extraheader || true
           
-          # Function to clone a repo if missing or empty
+          # Function to clone a repo safely
           ensure_repo() {
             local URL=$1
             local DEST=$2
             local BRANCH=$3
             local RECURSIVE=$4
             
-            echo "Ensuring $DEST from $URL..."
+            echo "Ensuring $DEST from $URL (branch=$BRANCH, recursive=$RECURSIVE)..."
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
             
@@ -61,7 +61,6 @@ jobs:
             if [ "$RECURSIVE" == "true" ]; then ARGS="$ARGS --recursive"; fi
             if [ -n "$BRANCH" ]; then ARGS="$ARGS -b $BRANCH"; fi
             
-            # Try cloning. If depth 1 fails, try full clone.
             git clone $ARGS "$URL" "$DEST" || git clone "$URL" "$DEST" || (sleep 5 && git clone "$URL" "$DEST") || echo "FAILED to clone $URL"
           }
 
@@ -91,7 +90,7 @@ jobs:
           
           echo "Cloning WebRTC for tgcalls..."
           mkdir -p app/jni/tgvoip/third_party
-          # WebRTC default branch is often 'master' or 'telegram' in TGX fork
+          # WebRTC default branch is 'telegram' in TGX fork
           ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
           ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
@@ -116,7 +115,7 @@ jobs:
             ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
-          echo "Final check of critical paths"
+          echo "Diagnostic: Final check of critical paths"
           ls -d vkryl/android || echo "vkryl/android MISSING"
           ls -d tgcalls || echo "tgcalls MISSING"
           ls -d app/jni/tgvoip/third_party/webrtc || echo "webrtc MISSING"
@@ -185,21 +184,25 @@ jobs:
           if os.path.exists(app_gradle):
               with open(app_gradle, "r") as f: content = f.read()
               if "missingDimensionStrategy" not in content:
-                  search = "defaultConfig {"
-                  replace = "defaultConfig {\n    missingDimensionStrategy(\"ABI\", \"universal\")"
-                  with open(app_gradle, "w") as f: f.write(content.replace(search, replace))
-                  print("Added missingDimensionStrategy to app/build.gradle.kts")
+                  # More robust search
+                  if "defaultConfig {" in content:
+                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"ABI\", \"universal\")")
+                      with open(app_gradle, "w") as f: f.write(content)
+                      print("Added missingDimensionStrategy to app/build.gradle.kts")
           '
           
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e
+          echo "CI Setup starting..."
           source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
+          echo "Running native setup scripts..."
           chmod +x scripts/private/*.sh
           scripts/private/patch-opus-impl.sh || true
           scripts/private/patch-androidx-media-impl.sh || true
           scripts/private/build-vpx-impl.sh || true
           scripts/private/build-ffmpeg-impl.sh || true
+          echo "CI Setup finished."
           EOF
           chmod +x scripts/ci_setup.sh
 
@@ -210,6 +213,8 @@ jobs:
       # 9. Build the APK
       - name: Build APK
         run: |
+          # Verify patch
+          grep "missingDimensionStrategy" app/build.gradle.kts || echo "PATCH FAILED"
           chmod +x gradlew
           ./gradlew assembleLatestArm64Release --stacktrace
 

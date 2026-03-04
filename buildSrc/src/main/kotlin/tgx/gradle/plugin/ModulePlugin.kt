@@ -30,8 +30,6 @@ open class ModulePlugin : Plugin<Project> {
         return
     }
     
-    project.logger.lifecycle("ModulePlugin: Extension 'android' found for ${project.path}, class: ${androidExt.javaClass.name}")
-
     if (androidExt is BaseExtension) {
       androidExt.apply {
         var compileSdkVersion: Int
@@ -68,6 +66,10 @@ open class ModulePlugin : Plugin<Project> {
           sourceCompatibility = Config.JAVA_VERSION
           targetCompatibility = Config.JAVA_VERSION
         }
+        
+        // Ensure coreLibraryDesugaring dependency is added
+        project.configurations.maybeCreate("coreLibraryDesugaring")
+        project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
         testOptions {
           unitTests.isReturnDefaultValues = true
@@ -102,10 +104,9 @@ open class ModulePlugin : Plugin<Project> {
 
         if (this is LibraryExtension) {
           project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as LibraryExtension")
-          flavorDimensions.add("SDK")
+          flavorDimensions += "SDK"
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
-              project.logger.lifecycle("ModulePlugin: Creating flavor ${variant.flavor} for ${project.path}")
               maybeCreate(variant.flavor).apply {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
@@ -168,14 +169,11 @@ open class ModulePlugin : Plugin<Project> {
             }
           }
 
-          val libs = project.the<LibrariesForLibs>()
           project.dependencies {
-            add("implementation", libs.androidx.multidex)
+            add("implementation", "androidx.multidex:multidex:2.0.1")
           }
         }
       }
-    } else {
-        project.logger.lifecycle("ModulePlugin: Extension 'android' for ${project.path} is NOT a BaseExtension")
     }
   }
 }

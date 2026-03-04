@@ -30,6 +30,8 @@ open class ModulePlugin : Plugin<Project> {
         return
     }
     
+    val libs = project.the<LibrariesForLibs>()
+
     if (androidExt is BaseExtension) {
       androidExt.apply {
         var compileSdkVersion: Int
@@ -66,10 +68,6 @@ open class ModulePlugin : Plugin<Project> {
           sourceCompatibility = Config.JAVA_VERSION
           targetCompatibility = Config.JAVA_VERSION
         }
-        
-        // Ensure coreLibraryDesugaring dependency is added
-        project.configurations.maybeCreate("coreLibraryDesugaring")
-        project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
         testOptions {
           unitTests.isReturnDefaultValues = true
@@ -170,9 +168,14 @@ open class ModulePlugin : Plugin<Project> {
           }
 
           project.dependencies {
-            add("implementation", "androidx.multidex:multidex:2.0.1")
+            add("implementation", libs.androidx.multidex)
           }
         }
+      }
+      
+      // Add coreLibraryDesugaring dependency AFTER android block to ensure configuration is ready
+      project.dependencies {
+        add("coreLibraryDesugaring", libs.desugaring)
       }
     }
   }

@@ -60,14 +60,37 @@ jobs:
             
             local ARGS="--depth 1"
             if [ "$RECURSIVE" == "true" ]; then ARGS="$ARGS --recursive"; fi
-            if [ -n "$BRANCH" ]; then ARGS="$ARGS -b $BRANCH"; fi
             
-            git clone $ARGS "$URL" "$DEST" || git clone "$URL" "$DEST" || (sleep 2 && git clone "$URL" "$DEST") || echo "FAILED to clone $URL"
+            # Try specified branch
+            if [ -n "$BRANCH" ]; then
+              if git clone $ARGS -b "$BRANCH" "$URL" "$DEST"; then
+                echo "Successfully cloned $URL branch $BRANCH"
+                return 0
+              fi
+              echo "Failed to clone branch $BRANCH, trying default branch..."
+            fi
+            
+            # Try default branch
+            if git clone $ARGS "$URL" "$DEST"; then
+              echo "Successfully cloned $URL default branch"
+              return 0
+            fi
+            
+            # Full clone fallback
+            echo "Shallow clone failed, trying full clone..."
+            if git clone "$URL" "$DEST"; then
+              echo "Successfully cloned $URL (full)"
+              return 0
+            fi
+            
+            echo "FAILED to clone $URL"
+            return 1
           }
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
+          # Try master then default for tgcalls
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true" || ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "" "true"
           
           mkdir -p vkryl
           ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
@@ -114,12 +137,16 @@ jobs:
             ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
-          echo "Eliminating non-KTS build files..."
-          find . -name "build.gradle" -exec rm -v {} +
-
           echo "Diagnostic: Final file check"
+          ls -R tgcalls | head -n 20
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
-          ls -l tgcalls/build.gradle || echo "tgcalls Groovy GONE"
+          
+          # Remove legacy build.gradle ONLY if build.gradle.kts exists
+          find . -name "build.gradle" -type f | while read f; do
+            if [ -f "${f}.kts" ]; then
+              rm -v "$f"
+            fi
+          done
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -185,7 +212,7 @@ jobs:
           if os.path.exists(app_gradle):
               with open(app_gradle, "r") as f: content = f.read()
               if "status != 0xf" in content:
-                  content = content.replace("status != 0xf", "false")
+                  content = content.replace("fatal(\"Using non-stable OpenSSL version:", "println(\"Using non-stable OpenSSL version:")
                   print("Disabled strict OpenSSL version check in app/build.gradle.kts")
               if "missingDimensionStrategy" not in content:
                   if "defaultConfig {" in content:

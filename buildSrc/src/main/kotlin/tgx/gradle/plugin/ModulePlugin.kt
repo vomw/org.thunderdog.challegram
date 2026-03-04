@@ -21,6 +21,8 @@ import java.io.File
 
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
+    project.logger.lifecycle("ModulePlugin: Applying to ${project.path}")
+    
     var compileSdkVersion: Int
     var buildToolsVersion: String
     var legacyNdkVersion: String
@@ -96,10 +98,12 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
-          flavorDimensions.add("SDK")
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
+          flavorDimensions += "SDK"
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
-              create(variant.flavor) {
+              project.logger.lifecycle("ModulePlugin: Creating flavor ${variant.flavor} for library ${project.path}")
+              maybeCreate(variant.flavor).apply {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
                   "-DANDROID_PLATFORM=android-${variant.minSdk}",
@@ -111,9 +115,8 @@ open class ModulePlugin : Plugin<Project> {
           defaultConfig {
             consumerProguardFiles("consumer-rules.pro")
           }
-        }
-
-        if (this is AppExtension) {
+        } else if (this is AppExtension) {
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as App")
           config?.keystore?.let { keystore ->
             signingConfigs {
               arrayOf(

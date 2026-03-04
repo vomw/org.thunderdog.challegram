@@ -23,37 +23,40 @@ open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
     project.logger.lifecycle("ModulePlugin: Applying to ${project.path}")
     
-    var compileSdkVersion: Int
-    var buildToolsVersion: String
-    var legacyNdkVersion: String
-    var targetSdkVersion: Int
-
-    val config = try {
-      project.extra["config"] as ApplicationConfig
-    } catch (_: Exception) {
-      null
+    val androidExt = try {
+        project.extensions.getByName("android")
+    } catch (e: Exception) {
+        project.logger.lifecycle("ModulePlugin: Extension 'android' NOT FOUND for ${project.path}")
+        return
     }
-    if (config != null) {
-      compileSdkVersion = config.compileSdkVersion
-      buildToolsVersion = config.buildToolsVersion
-      legacyNdkVersion = config.legacyNdkVersion
-      targetSdkVersion = config.targetSdkVersion
-    } else {
-      val versions = loadProperties("version.properties")
-      compileSdkVersion = versions.getIntOrThrow("version.sdk_compile")
-      buildToolsVersion = versions.getOrThrow("version.build_tools")
-      targetSdkVersion = versions.getIntOrThrow("version.sdk_target")
-      legacyNdkVersion = versions.getOrThrow("version.ndk_legacy")
-    }
+    
+    project.logger.lifecycle("ModulePlugin: Extension 'android' found for ${project.path}, class: ${androidExt.javaClass.name}")
 
-    val libs = project.the<LibrariesForLibs>()
-    project.dependencies {
-      add("coreLibraryDesugaring", libs.desugaring)
-    }
-
-    val androidExt = project.extensions.getByName("android")
     if (androidExt is BaseExtension) {
       androidExt.apply {
+        var compileSdkVersion: Int
+        var buildToolsVersion: String
+        var legacyNdkVersion: String
+        var targetSdkVersion: Int
+
+        val config = try {
+          project.extra["config"] as ApplicationConfig
+        } catch (_: Exception) {
+          null
+        }
+        if (config != null) {
+          compileSdkVersion = config.compileSdkVersion
+          buildToolsVersion = config.buildToolsVersion
+          legacyNdkVersion = config.legacyNdkVersion
+          targetSdkVersion = config.targetSdkVersion
+        } else {
+          val versions = loadProperties("version.properties")
+          compileSdkVersion = versions.getIntOrThrow("version.sdk_compile")
+          buildToolsVersion = versions.getOrThrow("version.build_tools")
+          targetSdkVersion = versions.getIntOrThrow("version.sdk_target")
+          legacyNdkVersion = versions.getOrThrow("version.ndk_legacy")
+        }
+
         compileSdkVersion(compileSdkVersion)
         buildToolsVersion(buildToolsVersion)
 
@@ -98,11 +101,11 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
-          flavorDimensions += "SDK"
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as LibraryExtension")
+          flavorDimensions.add("SDK")
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
-              project.logger.lifecycle("ModulePlugin: Creating flavor ${variant.flavor} for library ${project.path}")
+              project.logger.lifecycle("ModulePlugin: Creating flavor ${variant.flavor} for ${project.path}")
               maybeCreate(variant.flavor).apply {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
@@ -116,7 +119,7 @@ open class ModulePlugin : Plugin<Project> {
             consumerProguardFiles("consumer-rules.pro")
           }
         } else if (this is AppExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as App")
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as AppExtension")
           config?.keystore?.let { keystore ->
             signingConfigs {
               arrayOf(
@@ -165,11 +168,14 @@ open class ModulePlugin : Plugin<Project> {
             }
           }
 
+          val libs = project.the<LibrariesForLibs>()
           project.dependencies {
             add("implementation", libs.androidx.multidex)
           }
         }
       }
+    } else {
+        project.logger.lifecycle("ModulePlugin: Extension 'android' for ${project.path} is NOT a BaseExtension")
     }
   }
 }

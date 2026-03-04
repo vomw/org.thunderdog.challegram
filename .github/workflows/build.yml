@@ -91,7 +91,7 @@ jobs:
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          # Try main branch for tgcalls
+          # Try main then master for tgcalls
           ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true" || ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
           
           mkdir -p vkryl
@@ -120,8 +120,10 @@ jobs:
           ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
           mkdir -p thirdparty/WebRTC
-          if [ ! -f "app/jni/tgvoip/third_party/webrtc/src" ]; then
-            cp -r app/jni/tgvoip/third_party/webrtc/src thirdparty/WebRTC/
+          if [ -d "app/jni/tgvoip/third_party/webrtc" ]; then
+            # Copy content to thirdparty/WebRTC/src
+            mkdir -p thirdparty/WebRTC/src
+            cp -r app/jni/tgvoip/third_party/webrtc/* thirdparty/WebRTC/src/
           fi
           
           mkdir -p thirdparty/androidx-media

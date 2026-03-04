@@ -10,6 +10,7 @@ import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
 import java.io.File
+import java.util.Properties
 
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
@@ -24,35 +25,38 @@ open class ModulePlugin : Plugin<Project> {
     
     if (androidExt is BaseExtension) {
       androidExt.apply {
-        var compileSdkVersion: Int
-        var buildToolsVersion: String
-        var legacyNdkVersion: String
-        var targetSdkVersion: Int
+        var compileSdkVersionValue: Int
+        var buildToolsVersionValue: String
+        var legacyNdkVersionValue: String
+        var targetSdkVersionValue: Int
 
         val config = try {
-          project.extensions.extraProperties["config"] as ApplicationConfig
+          project.rootProject.extensions.extraProperties["config"] as? ApplicationConfig
         } catch (_: Exception) {
           null
         }
         
         if (config != null) {
-          compileSdkVersion = config.compileSdkVersion
-          buildToolsVersion = config.buildToolsVersion
-          legacyNdkVersion = config.legacyNdkVersion
-          targetSdkVersion = config.targetSdkVersion
+          compileSdkVersionValue = config.compileSdkVersion
+          buildToolsVersionValue = config.buildToolsVersion
+          legacyNdkVersionValue = config.legacyNdkVersion
+          targetSdkVersionValue = config.targetSdkVersion
         } else {
-          val versions = project.rootProject.file("version.properties")
-          val props = java.util.Properties().apply { if (versions.exists()) versions.inputStream().use { load(it) } }
-          compileSdkVersion = props.getProperty("version.sdk_compile")?.toInt() ?: 35
-          buildToolsVersion = props.getProperty("version.build_tools") ?: "35.0.0"
-          targetSdkVersion = props.getProperty("version.sdk_target")?.toInt() ?: 35
-          legacyNdkVersion = props.getProperty("version.ndk_legacy") ?: "26.3.11579264"
+          val versionsFile = File(project.rootDir, "version.properties")
+          val props = Properties()
+          if (versionsFile.exists()) {
+            versionsFile.inputStream().use { props.load(it) }
+          }
+          compileSdkVersionValue = props.getProperty("version.sdk_compile")?.toInt() ?: 35
+          buildToolsVersionValue = props.getProperty("version.build_tools") ?: "35.0.0"
+          targetSdkVersionValue = props.getProperty("version.sdk_target")?.toInt() ?: 35
+          legacyNdkVersionValue = props.getProperty("version.ndk_legacy") ?: "26.3.11579264"
         }
 
-        compileSdkVersion(compileSdkVersion)
-        buildToolsVersion(buildToolsVersion)
+        compileSdkVersion(compileSdkVersionValue)
+        buildToolsVersion(buildToolsVersionValue)
 
-        ndkVersion = legacyNdkVersion
+        ndkVersion = legacyNdkVersionValue
         ndkPath = File(sdkDirectory, "ndk/$ndkVersion").absolutePath
 
         compileOptions {
@@ -60,6 +64,9 @@ open class ModulePlugin : Plugin<Project> {
           sourceCompatibility = Config.JAVA_VERSION
           targetCompatibility = Config.JAVA_VERSION
         }
+        
+        project.configurations.maybeCreate("coreLibraryDesugaring")
+        project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
         testOptions {
           unitTests.isReturnDefaultValues = true
@@ -88,15 +95,16 @@ open class ModulePlugin : Plugin<Project> {
 
         defaultConfig {
           minSdk = Config.MIN_SDK_VERSION
-          targetSdk = targetSdkVersion
+          targetSdk = targetSdkVersionValue
           multiDexEnabled = true
         }
 
         if (this is LibraryExtension) {
           project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
-          flavorDimensions.add("SDK")
+          flavorDimensions += "SDK"
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
+              project.logger.lifecycle("ModulePlugin: Registering flavor ${variant.flavor} for ${project.path}")
               maybeCreate(variant.flavor).apply {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
@@ -116,18 +124,18 @@ open class ModulePlugin : Plugin<Project> {
               arrayOf(
                 getByName("debug"),
                 maybeCreate("release")
-              ).forEach { config ->
-                config.storeFile = keystore.file
-                config.storePassword = keystore.password
-                config.keyAlias = keystore.keyAlias
-                config.keyPassword = keystore.keyPassword
-                config.enableV2Signing = true
+              ).forEach { sc ->
+                sc.storeFile = keystore.file
+                sc.storePassword = keystore.password
+                sc.keyAlias = keystore.keyAlias
+                sc.keyPassword = keystore.keyPassword
+                sc.enableV2Signing = true
               }
             }
 
             buildTypes {
               getByName("debug") {
-                signingConfig = signingConfigs["debug"]
+                signingConfig = signingConfigs.getByName("debug")
                 isDebuggable = true
                 isJniDebuggable = true
                 isMinifyEnabled = false
@@ -144,7 +152,7 @@ open class ModulePlugin : Plugin<Project> {
               }
 
               getByName("release") {
-                signingConfig = signingConfigs["release"]
+                signingConfig = signingConfigs.getByName("release")
                 isMinifyEnabled = !config.doNotObfuscate
                 isShrinkResources = !config.doNotObfuscate
                 ndk.debugSymbolLevel = "full"
@@ -162,9 +170,6 @@ open class ModulePlugin : Plugin<Project> {
           project.dependencies.add("implementation", "androidx.multidex:multidex:2.0.1")
         }
       }
-      
-      // Ensure coreLibraryDesugaring is added to ALL modules applying this plugin
-      project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
     }
   }
 }

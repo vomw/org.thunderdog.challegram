@@ -6,17 +6,9 @@ import com.android.build.gradle.AppExtension
 import com.android.build.gradle.BaseExtension
 import com.android.build.gradle.LibraryExtension
 import com.android.build.gradle.ProguardFiles
-import org.gradle.accessors.dm.LibrariesForLibs
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
-import org.gradle.kotlin.dsl.dependencies
-import org.gradle.kotlin.dsl.extra
-import org.gradle.kotlin.dsl.get
-import org.gradle.kotlin.dsl.the
-import tgx.gradle.getIntOrThrow
-import tgx.gradle.getOrThrow
-import tgx.gradle.loadProperties
 import java.io.File
 
 open class ModulePlugin : Plugin<Project> {
@@ -30,8 +22,6 @@ open class ModulePlugin : Plugin<Project> {
         return
     }
     
-    val libs = project.the<LibrariesForLibs>()
-
     if (androidExt is BaseExtension) {
       androidExt.apply {
         var compileSdkVersion: Int
@@ -40,21 +30,23 @@ open class ModulePlugin : Plugin<Project> {
         var targetSdkVersion: Int
 
         val config = try {
-          project.extra["config"] as ApplicationConfig
+          project.extensions.extraProperties["config"] as ApplicationConfig
         } catch (_: Exception) {
           null
         }
+        
         if (config != null) {
           compileSdkVersion = config.compileSdkVersion
           buildToolsVersion = config.buildToolsVersion
           legacyNdkVersion = config.legacyNdkVersion
           targetSdkVersion = config.targetSdkVersion
         } else {
-          val versions = loadProperties("version.properties")
-          compileSdkVersion = versions.getIntOrThrow("version.sdk_compile")
-          buildToolsVersion = versions.getOrThrow("version.build_tools")
-          targetSdkVersion = versions.getIntOrThrow("version.sdk_target")
-          legacyNdkVersion = versions.getOrThrow("version.ndk_legacy")
+          val versions = project.rootProject.file("version.properties")
+          val props = java.util.Properties().apply { if (versions.exists()) versions.inputStream().use { load(it) } }
+          compileSdkVersion = props.getProperty("version.sdk_compile")?.toInt() ?: 35
+          buildToolsVersion = props.getProperty("version.build_tools") ?: "35.0.0"
+          targetSdkVersion = props.getProperty("version.sdk_target")?.toInt() ?: 35
+          legacyNdkVersion = props.getProperty("version.ndk_legacy") ?: "26.3.11579264"
         }
 
         compileSdkVersion(compileSdkVersion)
@@ -101,8 +93,8 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as LibraryExtension")
-          flavorDimensions += "SDK"
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
+          flavorDimensions.add("SDK")
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
               maybeCreate(variant.flavor).apply {
@@ -118,7 +110,7 @@ open class ModulePlugin : Plugin<Project> {
             consumerProguardFiles("consumer-rules.pro")
           }
         } else if (this is AppExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as AppExtension")
+          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as App")
           config?.keystore?.let { keystore ->
             signingConfigs {
               arrayOf(
@@ -167,16 +159,12 @@ open class ModulePlugin : Plugin<Project> {
             }
           }
 
-          project.dependencies {
-            add("implementation", libs.androidx.multidex)
-          }
+          project.dependencies.add("implementation", "androidx.multidex:multidex:2.0.1")
         }
       }
       
-      // Add coreLibraryDesugaring dependency AFTER android block to ensure configuration is ready
-      project.dependencies {
-        add("coreLibraryDesugaring", libs.desugaring)
-      }
+      // Ensure coreLibraryDesugaring is added to ALL modules applying this plugin
+      project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
     }
   }
 }

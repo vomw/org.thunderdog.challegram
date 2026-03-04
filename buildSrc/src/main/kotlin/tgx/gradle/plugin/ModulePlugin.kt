@@ -9,8 +9,10 @@ import com.android.build.gradle.ProguardFiles
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
+import tgx.gradle.getIntOrThrow
+import tgx.gradle.getOrThrow
+import tgx.gradle.loadProperties
 import java.io.File
-import java.util.Properties
 
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
@@ -42,15 +44,12 @@ open class ModulePlugin : Plugin<Project> {
           legacyNdkVersionValue = config.legacyNdkVersion
           targetSdkVersionValue = config.targetSdkVersion
         } else {
-          val versionsFile = File(project.rootDir, "version.properties")
-          val props = Properties()
-          if (versionsFile.exists()) {
-            versionsFile.inputStream().use { props.load(it) }
-          }
-          compileSdkVersionValue = props.getProperty("version.sdk_compile")?.toInt() ?: 35
-          buildToolsVersionValue = props.getProperty("version.build_tools") ?: "35.0.0"
-          targetSdkVersionValue = props.getProperty("version.sdk_target")?.toInt() ?: 35
-          legacyNdkVersionValue = props.getProperty("version.ndk_legacy") ?: "26.3.11579264"
+          val versionsFile = File(project.rootProject.projectDir, "version.properties")
+          val versions = loadProperties(versionsFile.absolutePath)
+          compileSdkVersionValue = versions.getIntOrThrow("version.sdk_compile")
+          buildToolsVersionValue = versions.getOrThrow("version.build_tools")
+          targetSdkVersionValue = versions.getIntOrThrow("version.sdk_target")
+          legacyNdkVersionValue = versions.getOrThrow("version.ndk_legacy")
         }
 
         compileSdkVersion(compileSdkVersionValue)
@@ -65,6 +64,7 @@ open class ModulePlugin : Plugin<Project> {
           targetCompatibility = Config.JAVA_VERSION
         }
         
+        // Ensure configuration and dependency are added
         project.configurations.maybeCreate("coreLibraryDesugaring")
         project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 

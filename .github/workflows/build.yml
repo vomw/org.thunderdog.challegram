@@ -69,6 +69,7 @@ jobs:
                 return 0
               fi
               echo "Failed to clone branch $BRANCH, trying default branch..."
+              rm -rf "$DEST"
             fi
             
             # Try default branch
@@ -119,10 +120,9 @@ jobs:
           ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
           ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
-          mkdir -p thirdparty/WebRTC
+          mkdir -p thirdparty/WebRTC/src
           if [ -d "app/jni/tgvoip/third_party/webrtc" ]; then
-            # Copy content to thirdparty/WebRTC/src
-            mkdir -p thirdparty/WebRTC/src
+            echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
             cp -r app/jni/tgvoip/third_party/webrtc/* thirdparty/WebRTC/src/
           fi
           
@@ -142,16 +142,13 @@ jobs:
           fi
 
           echo "Eliminating legacy build files..."
-          # Only remove build.gradle if build.gradle.kts exists
           find . -name "build.gradle" -type f | while read f; do
             if [ -f "${f}.kts" ]; then
-              echo "Removing legacy $f"
               rm -v "$f"
             fi
           done
 
           echo "Diagnostic: Final file check"
-          ls -R tgcalls | head -n 20 || echo "tgcalls dir missing"
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS STILL MISSING"
 
       # 5. Pre-configure local.properties

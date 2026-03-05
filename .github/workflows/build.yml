@@ -34,14 +34,13 @@ jobs:
       # 3. Install System Dependencies
       - name: Install System Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yasm wget unzip git python3 > /dev/null
 
       # 4. Comprehensive Submodule Setup
       - name: Setup Submodules
         run: |
           set -e
-          set -x
           
           # Remove interfering header
           git config --global --unset-all http.https://github.com/.extraheader || true
@@ -54,39 +53,24 @@ jobs:
             local BRANCH=$3
             local RECURSIVE=$4
             
-            echo "Ensuring $DEST from $URL..."
+            echo "Ensuring $DEST..."
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
             
             local BASE_ARGS="--depth 1"
             if [ "$RECURSIVE" == "true" ]; then BASE_ARGS="$BASE_ARGS --recursive"; fi
             
-            # Try specified branch
             if [ -n "$BRANCH" ]; then
-              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST"; then
-                echo "Successfully cloned $URL branch $BRANCH"
+              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST" 2>/dev/null; then
                 return 0
               fi
-              echo "Failed to clone branch $BRANCH, trying default branch..."
-              rm -rf "$DEST"
             fi
             
-            # Try default branch
-            if git clone $BASE_ARGS "$URL" "$DEST"; then
-              echo "Successfully cloned $URL default branch"
+            if git clone $BASE_ARGS "$URL" "$DEST" 2>/dev/null; then
               return 0
             fi
             
-            # Full clone fallback
-            echo "Shallow clone failed, trying full clone..."
-            rm -rf "$DEST"
-            if git clone "$URL" "$DEST"; then
-              echo "Successfully cloned $URL (full)"
-              return 0
-            fi
-            
-            echo "FAILED to clone $URL"
-            return 1
+            git clone "$URL" "$DEST" 2>/dev/null
           }
 
           echo "Cloning core dependencies..."
@@ -120,7 +104,6 @@ jobs:
           
           mkdir -p thirdparty/WebRTC/src
           if [ -d "app/jni/tgvoip/third_party/webrtc" ]; then
-            echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
             cp -r app/jni/tgvoip/third_party/webrtc/* thirdparty/WebRTC/src/
           fi
           
@@ -142,12 +125,9 @@ jobs:
           echo "Eliminating legacy build files..."
           find . -name "build.gradle" -type f | while read f; do
             if [ -f "${f}.kts" ]; then
-              rm -v "$f"
+              rm "$f"
             fi
           done
-
-          echo "Diagnostic: Final file check"
-          ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS STILL MISSING"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -164,7 +144,7 @@ jobs:
           echo "keystore.file=$(pwd)/keystore.properties" >> local.properties
           
           if [ ! -f app/google-services.json ]; then
-            echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1","android_client_info":{"package_name":"org.thunderdog.challegram"}},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
+            echo '{"project_info":{"project_number":"1","project_id":"p","storage_bucket":"s"},"client":[{"client_info":{"mobilesdk_app_id":"1:1:android:1"},"api_key":[{"current_key":"k"}]}]}' > app/google-services.json
           fi
 
       # 6. Setup Keystore
@@ -217,9 +197,7 @@ jobs:
                   print("Disabled strict OpenSSL version check in app/build.gradle.kts")
               if "missingDimensionStrategy" not in content:
                   if "defaultConfig {" in content:
-                      # Consumer (app) has ABI, Producer (libs) is missing it.
-                      # We must tell consumer what to do when ABI is missing.
-                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"ABI\", \"universal\")")
+                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"SDK\", \"latest\")\n    missingDimensionStrategy(\"ABI\", \"universal\")")
                       print("Added missingDimensionStrategy to app/build.gradle.kts")
               with open(app_gradle, "w") as f: f.write(content)
           '
@@ -227,15 +205,12 @@ jobs:
           cat > scripts/ci_setup.sh <<'EOF'
           #!/bin/bash
           set -e
-          echo "CI Setup starting..."
-          source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root
-          echo "Running native setup scripts..."
+          source "$(pwd)/scripts/setup-sdk.sh" --default-sdk-root > /dev/null
           chmod +x scripts/private/*.sh
           scripts/private/patch-opus-impl.sh || true
           scripts/private/patch-androidx-media-impl.sh || true
-          scripts/private/build-vpx-impl.sh || true
-          scripts/private/build-ffmpeg-impl.sh || true
-          echo "CI Setup finished."
+          scripts/private/build-vpx-impl.sh > /dev/null || true
+          scripts/private/build-ffmpeg-impl.sh > /dev/null || true
           EOF
           chmod +x scripts/ci_setup.sh
 
@@ -247,7 +222,7 @@ jobs:
       - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew assembleLatestArm64Release --stacktrace
+          ./gradlew assembleLatestArm64Release --stacktrace --console=plain
 
       # 10. Upload Artifact
       - name: Upload APK

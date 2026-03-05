@@ -36,7 +36,14 @@ val checkEmojiKeyboard by tasks.registering(CheckEmojiKeyboardTask::class) {
   description = "Checks that all supported emoji can be entered from the keyboard"
 }
 
-val config = rootProject.extra["config"] as ApplicationConfig
+println("app/build.gradle.kts: rootProject.path=${rootProject.path}")
+println("app/build.gradle.kts: rootProject.extra.has(\"config\")=${rootProject.extra.has("config")}")
+val config = if (rootProject.extra.has("config")) {
+    rootProject.extra["config"] as ApplicationConfig
+} else {
+    println("app/build.gradle.kts: config NOT FOUND in rootProject.extra, checking local extra...")
+    extra["config"] as ApplicationConfig
+}
 
 //noinspection WrongGradleMethod
 android {

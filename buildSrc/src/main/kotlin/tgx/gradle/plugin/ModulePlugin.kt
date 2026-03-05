@@ -34,10 +34,15 @@ open class ModulePlugin : Plugin<Project> {
         var targetSdkVersionValue: Int
 
         val config = try {
-          project.rootProject.extensions.extraProperties["config"] as? ApplicationConfig
-        } catch (_: Exception) {
+          val fromRoot = project.rootProject.extensions.extraProperties.let { if (it.has("config")) it["config"] else null }
+          val fromLocal = project.extensions.extraProperties.let { if (it.has("config")) it["config"] else null }
+          (fromRoot ?: fromLocal) as? ApplicationConfig
+        } catch (e: Exception) {
+          project.logger.lifecycle("ModulePlugin: Error retrieving config for ${project.path}: ${e.message}")
           null
         }
+        
+        project.logger.lifecycle("ModulePlugin: config found for ${project.path}? ${config != null}")
         
         if (config != null) {
           compileSdkVersionValue = config.compileSdkVersion
@@ -46,6 +51,7 @@ open class ModulePlugin : Plugin<Project> {
           targetSdkVersionValue = config.targetSdkVersion
         } else {
           val versionsFile = File(project.rootProject.projectDir, "version.properties")
+          project.logger.lifecycle("ModulePlugin: Loading versions from ${versionsFile.absolutePath}")
           val versions = if (versionsFile.exists()) loadProperties(versionsFile.absolutePath) else Properties()
           compileSdkVersionValue = if (versionsFile.exists()) versions.getIntOrThrow("version.sdk_compile") else 35
           buildToolsVersionValue = if (versionsFile.exists()) versions.getOrThrow("version.build_tools") else "35.0.0"

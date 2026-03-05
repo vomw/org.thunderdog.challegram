@@ -40,8 +40,16 @@ class Keystore (configPath: String) {
 
 open class ConfigurationPlugin : Plugin<Project> {
   override fun apply(project: Project) {
-    val properties = loadProperties()
-    val sampleProperties = loadProperties("local.properties.sample")
+    project.logger.lifecycle("ConfigurationPlugin: Applying to ${project.path}")
+    fun loadProjectProperties(path: String): java.util.Properties {
+        val file = project.file(path)
+        if (!file.canRead()) fatal("Cannot read ${file.absolutePath}")
+        val props = java.util.Properties()
+        file.bufferedReader().use { props.load(it) }
+        return props
+    }
+    val properties = loadProjectProperties("local.properties")
+    val sampleProperties = loadProjectProperties("local.properties.sample")
     val keystoreFilePath = properties.getProperty("keystore.file", "")
     val disableSigning = properties.getProperty("app.disable_signing", "false") == "true"
     val keystore = if (keystoreFilePath.isNotEmpty() && !disableSigning) {
@@ -74,7 +82,7 @@ open class ConfigurationPlugin : Plugin<Project> {
     }
     val isHuaweiBuild = appExtension == "hms"
 
-    val versions = loadProperties("version.properties")
+    val versions = loadProjectProperties("version.properties")
 
     val compileSdkVersion = versions.getIntOrThrow("version.sdk_compile")
     val buildToolsVersion = versions.getOrThrow("version.build_tools")

@@ -53,7 +53,7 @@ jobs:
             local BRANCH=$3
             local RECURSIVE=$4
             
-            echo "Ensuring $DEST..."
+            echo "--- Ensuring $DEST from $URL (branch: $BRANCH) ---"
             rm -rf "$DEST"
             mkdir -p "$(dirname "$DEST")"
             
@@ -61,21 +61,34 @@ jobs:
             if [ "$RECURSIVE" == "true" ]; then BASE_ARGS="$BASE_ARGS --recursive"; fi
             
             if [ -n "$BRANCH" ]; then
-              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST" 2>/dev/null; then
+              echo "Attempting clone branch $BRANCH..."
+              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST"; then
+                echo "SUCCESS: Cloned $BRANCH"
                 return 0
               fi
+              echo "FAILED to clone branch $BRANCH, trying default branch..."
             fi
             
-            if git clone $BASE_ARGS "$URL" "$DEST" 2>/dev/null; then
+            if git clone $BASE_ARGS "$URL" "$DEST"; then
+              echo "SUCCESS: Cloned default branch"
               return 0
             fi
             
-            git clone "$URL" "$DEST" 2>/dev/null
+            echo "Shallow clone failed, trying full clone..."
+            rm -rf "$DEST"
+            if git clone "$URL" "$DEST"; then
+              echo "SUCCESS: Full clone"
+              return 0
+            fi
+            
+            echo "ERROR: All clone attempts failed for $URL"
+            return 1
           }
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true" || ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
+          # tgcalls default branch is 'development'
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "development" "true"
           
           mkdir -p vkryl
           ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
@@ -104,6 +117,7 @@ jobs:
           
           mkdir -p thirdparty/WebRTC/src
           if [ -d "app/jni/tgvoip/third_party/webrtc" ]; then
+            echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
             cp -r app/jni/tgvoip/third_party/webrtc/* thirdparty/WebRTC/src/
           fi
           
@@ -125,9 +139,12 @@ jobs:
           echo "Eliminating legacy build files..."
           find . -name "build.gradle" -type f | while read f; do
             if [ -f "${f}.kts" ]; then
-              rm "$f"
+              rm -v "$f"
             fi
           done
+
+          echo "Diagnostic: Final file check"
+          ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS STILL MISSING"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties

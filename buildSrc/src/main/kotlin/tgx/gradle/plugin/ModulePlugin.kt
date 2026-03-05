@@ -13,6 +13,7 @@ import tgx.gradle.getIntOrThrow
 import tgx.gradle.getOrThrow
 import tgx.gradle.loadProperties
 import java.io.File
+import java.util.Properties
 
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
@@ -45,11 +46,11 @@ open class ModulePlugin : Plugin<Project> {
           targetSdkVersionValue = config.targetSdkVersion
         } else {
           val versionsFile = File(project.rootProject.projectDir, "version.properties")
-          val versions = loadProperties(versionsFile.absolutePath)
-          compileSdkVersionValue = versions.getIntOrThrow("version.sdk_compile")
-          buildToolsVersionValue = versions.getOrThrow("version.build_tools")
-          targetSdkVersionValue = versions.getIntOrThrow("version.sdk_target")
-          legacyNdkVersionValue = versions.getOrThrow("version.ndk_legacy")
+          val versions = if (versionsFile.exists()) loadProperties(versionsFile.absolutePath) else Properties()
+          compileSdkVersionValue = if (versionsFile.exists()) versions.getIntOrThrow("version.sdk_compile") else 35
+          buildToolsVersionValue = if (versionsFile.exists()) versions.getOrThrow("version.build_tools") else "35.0.0"
+          targetSdkVersionValue = if (versionsFile.exists()) versions.getIntOrThrow("version.sdk_target") else 35
+          legacyNdkVersionValue = if (versionsFile.exists()) versions.getOrThrow("version.ndk_legacy") else "26.3.11579264"
         }
 
         compileSdkVersion(compileSdkVersionValue)
@@ -64,8 +65,7 @@ open class ModulePlugin : Plugin<Project> {
           targetCompatibility = Config.JAVA_VERSION
         }
         
-        // Ensure configuration and dependency are added
-        project.configurations.maybeCreate("coreLibraryDesugaring")
+        // Add dependency to coreLibraryDesugaring. Configuration is created by AGP when isCoreLibraryDesugaringEnabled is true.
         project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
         testOptions {
@@ -101,11 +101,11 @@ open class ModulePlugin : Plugin<Project> {
 
         if (this is LibraryExtension) {
           project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
-          flavorDimensions += "SDK"
+          flavorDimensions.add("SDK")
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
               project.logger.lifecycle("ModulePlugin: Registering flavor ${variant.flavor} for ${project.path}")
-              maybeCreate(variant.flavor).apply {
+              create(variant.flavor) {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
                   "-DANDROID_PLATFORM=android-${variant.minSdk}",

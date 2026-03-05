@@ -63,7 +63,6 @@ jobs:
             
             # Try specified branch
             if [ -n "$BRANCH" ]; then
-              echo "Attempting clone branch $BRANCH..."
               if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST"; then
                 echo "Successfully cloned $URL branch $BRANCH"
                 return 0
@@ -92,7 +91,6 @@ jobs:
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          # Try main then master for tgcalls
           ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "main" "true" || ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "master" "true"
           
           mkdir -p vkryl
@@ -219,7 +217,9 @@ jobs:
                   print("Disabled strict OpenSSL version check in app/build.gradle.kts")
               if "missingDimensionStrategy" not in content:
                   if "defaultConfig {" in content:
-                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"SDK\", \"latest\")\n    missingDimensionStrategy(\"ABI\", \"universal\")")
+                      # Consumer (app) has ABI, Producer (libs) is missing it.
+                      # We must tell consumer what to do when ABI is missing.
+                      content = content.replace("defaultConfig {", "defaultConfig {\n    missingDimensionStrategy(\"ABI\", \"universal\")")
                       print("Added missingDimensionStrategy to app/build.gradle.kts")
               with open(app_gradle, "w") as f: f.write(content)
           '

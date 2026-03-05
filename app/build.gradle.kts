@@ -36,7 +36,7 @@ val checkEmojiKeyboard by tasks.registering(CheckEmojiKeyboardTask::class) {
   description = "Checks that all supported emoji can be entered from the keyboard"
 }
 
-val config = extra["config"] as ApplicationConfig
+val config = rootProject.extra["config"] as ApplicationConfig
 
 //noinspection WrongGradleMethod
 android {

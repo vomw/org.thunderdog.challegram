@@ -22,7 +22,7 @@ jobs:
         with:
           fetch-depth: 0
           lfs: true
-          submodules: false # We will handle them manually for better control
+          submodules: false
 
       # 2. Setup Java 21
       - name: Set up JDK 21
@@ -37,48 +37,125 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq yasm wget unzip git python3 > /dev/null
 
-      # 4. Comprehensive Submodule Setup
-      - name: Setup Submodules
+      # 4. Comprehensive Dependency Setup
+      - name: Setup Dependencies
         run: |
           set -e
           
-          # Remove interfering header and set up URL rewriting
+          # Remove interfering header
           git config --global --unset-all http.https://github.com/.extraheader || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          echo "Syncing submodules..."
-          git submodule sync --recursive
-          
-          # We will update submodules one by one to better track failures
-          # and use shallow clones where possible to save time/space
-          PATHS=$(git config --file .gitmodules --get-regexp path | awk '{print $2}')
-          
-          for p in $PATHS; do
-            echo "--- Updating submodule: $p ---"
-            # Attempt shallow update first
-            git submodule update --init --depth 1 --recursive "$p" || \
-            git submodule update --init --recursive "$p" || \
-            echo "WARNING: Failed to update submodule $p"
-          done
+          # Function to clone a repo safely
+          ensure_repo() {
+            local URL=$1
+            local DEST=$2
+            local BRANCH=$3
+            local RECURSIVE=$4
+            
+            # PROTECT tracked directories
+            if [[ "$DEST" == "tgcalls" ]] || [[ "$DEST" == "app/jni/third_party/androidx-media" ]]; then
+              echo "Skipping tracked directory $DEST"
+              return 0
+            fi
+            
+            echo "--- Ensuring $DEST from $URL (branch: $BRANCH) ---"
+            rm -rf "$DEST"
+            mkdir -p "$(dirname "$DEST")"
+            
+            local BASE_ARGS="--depth 1"
+            if [ "$RECURSIVE" == "true" ]; then BASE_ARGS="$BASE_ARGS --recursive"; fi
+            
+            # Attempt 1: Specified branch
+            if [ -n "$BRANCH" ]; then
+              echo "Attempting clone branch $BRANCH..."
+              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST" 2>/dev/null; then
+                echo "SUCCESS: Cloned $BRANCH"
+                return 0
+              fi
+              echo "FAILED to clone branch $BRANCH, trying default branch..."
+            fi
+            
+            # Attempt 2: Default branch
+            if git clone $BASE_ARGS "$URL" "$DEST" 2>/dev/null; then
+              echo "SUCCESS: Cloned default branch"
+              return 0
+            fi
+            
+            # Attempt 3: Full clone
+            rm -rf "$DEST"
+            if git clone "$URL" "$DEST" 2>/dev/null; then
+              echo "SUCCESS: Full clone"
+              return 0
+            fi
+            
+            echo "ERROR: All clone attempts failed for $URL"
+            return 1
+          }
 
-          echo "Fixing internal missing files..."
-          # Fix libyuv missing MSA files in BuildYuv.cmake
-          python3 -c '
-          import os
-          yuv_cmake = "app/jni/BuildYuv.cmake"
-          if os.path.exists(yuv_cmake):
-              with open(yuv_cmake, "r") as f: lines = f.readlines()
-              with open(yuv_cmake, "w") as f:
-                  for line in lines:
-                      if "_msa.cc" in line:
-                          f.write("# " + line)
-                      else:
-                          f.write(line)
-              print(f"Patched {yuv_cmake} to disable MSA files")
-          '
+          echo "Cloning core dependencies..."
+          ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true" 
+          
+          mkdir -p vkryl
+          ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
+          ensure_repo "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
+          
+          echo "Cloning native dependencies..."
+          mkdir -p app/jni/third_party
+          ensure_repo "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "" "false"
+          ensure_repo "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1" "false"
+          ensure_repo "https://github.com/xiph/opus" "app/jni/third_party/opus" "" "false"
+          ensure_repo "https://github.com/xiph/flac" "app/jni/third_party/flac" "" "false"
+          ensure_repo "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "" "false"
+          ensure_repo "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "" "false"
+          ensure_repo "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
+          ensure_repo "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
+          ensure_repo "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
+          ensure_repo "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
+          
+          echo "Cloning WebRTC and tgvoip dependencies..."
+          mkdir -p app/jni/tgvoip/third_party
+          ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "development" "true"
+          ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
+          ensure_repo "https://github.com/TGX-Android/libevent" "app/jni/tgvoip/third_party/libevent" "main" "false"
+          ensure_repo "https://github.com/google/crc32c" "app/jni/tgvoip/third_party/crc32c" "main" "false"
+          ensure_repo "https://github.com/TGX-Android/rnnoise" "app/jni/tgvoip/third_party/rnnoise" "main" "false"
+          ensure_repo "https://github.com/sctplab/usrsctp" "app/jni/tgvoip/third_party/usrsctp" "master" "false"
+          ensure_repo "https://github.com/cisco/libsrtp" "app/jni/tgvoip/third_party/libsrtp" "main" "false"
+          ensure_repo "https://github.com/cisco/openh264" "app/jni/tgvoip/third_party/openh264" "master" "false"
+          ensure_repo "https://github.com/abseil/abseil-cpp" "app/jni/tgvoip/third_party/abseil-cpp" "master" "false"
+          
+          mkdir -p app/jni/tgvoip/third_party/webrtc_deps
+          ensure_repo "https://chromium.googlesource.com/chromium/src/base" "app/jni/tgvoip/third_party/webrtc_deps/base" "main" "false"
+          ensure_repo "https://chromium.googlesource.com/chromium/src/third_party" "app/jni/tgvoip/third_party/webrtc_deps/third_party" "main" "false"
+          
+          echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
+          mkdir -p thirdparty/WebRTC/src
+          if [ -d "app/jni/tgvoip/third_party/webrtc" ]; then
+            cp -r app/jni/tgvoip/third_party/webrtc/* thirdparty/WebRTC/src/
+          fi
+          
+          mkdir -p thirdparty/androidx-media
+          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
+          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/latest" "release" "false"
+          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/lollipop" "release" "false"
+
+          echo "Fixing internal submodules..."
+          if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
+            ensure_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
+          fi
+          if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
+            ensure_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
+          fi
+          if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
+            ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
+          fi
 
           echo "Eliminating legacy build files..."
-          # Only remove build.gradle if build.gradle.kts exists
           find . -name "build.gradle" -type f | while read f; do
             if [ -f "${f}.kts" ]; then
               rm "$f"
@@ -88,7 +165,6 @@ jobs:
           echo "Diagnostic: Final file check"
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
           ls -l app/jni/third_party/androidx-media/latest/opus_jni.cc || echo "opus_jni.cc MISSING"
-          # Check one of the problematic tgvoip deps
           ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || echo "libsrtp stat.c MISSING"
 
       # 5. Pre-configure local.properties
@@ -146,6 +222,18 @@ jobs:
 
           inject_skip("scripts/private/build-ffmpeg-impl.sh", "function build_one {", "  if [[ \"$FLAVOR\" != \"latest\" ]] || [[ \"$PLATFORM\" != \"arm64-v8a\" ]]; then return 0; fi")
           inject_skip("scripts/private/build-vpx-impl.sh", "configure_make() {", "  if [[ \"$1\" != \"latest\" ]] || [[ \"$2\" != \"arm64-v8a\" ]]; then return 0; fi")
+          
+          # Fix libyuv missing MSA files in BuildYuv.cmake
+          yuv_cmake = "app/jni/BuildYuv.cmake"
+          if os.path.exists(yuv_cmake):
+              with open(yuv_cmake, "r") as f: lines = f.readlines()
+              with open(yuv_cmake, "w") as f:
+                  for line in lines:
+                      if "_msa.cc" in line:
+                          f.write("# " + line)
+                      else:
+                          f.write(line)
+              print(f"Patched {yuv_cmake} to disable MSA files")
           
           # Disable strict OpenSSL version check in app/build.gradle.kts
           app_gradle = "app/build.gradle.kts"

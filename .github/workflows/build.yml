@@ -67,19 +67,34 @@ jobs:
             git init -q
             git remote add origin "$URL"
             
-            # Try to fetch the specific REF (commit or branch)
-            if git fetch --depth 1 origin "$REF" 2>/dev/null; then
+            if [ -z "$REF" ]; then
+              git fetch --depth 1 origin
               git checkout -q FETCH_HEAD
-              echo "SUCCESS: Fetched $REF"
+              echo "SUCCESS: Cloned default branch"
             else
-              echo "Ref $REF failed, fetching default branch..."
-              git fetch --depth 1 origin 2>/dev/null
-              git checkout -q FETCH_HEAD
+              local FETCH_ARGS=""
+              if [[ $REF == refs/* ]] || [[ $REF == [a-zA-Z]* ]]; then FETCH_ARGS="--depth 1"; fi
+              
+              if git fetch $FETCH_ARGS origin "$REF" 2>/dev/null; then
+                git checkout -q FETCH_HEAD
+                echo "SUCCESS: Fetched $REF"
+              else
+                echo "Ref $REF failed, fetching full default branch..."
+                git fetch origin 2>/dev/null
+                if git checkout -q "$REF" 2>/dev/null || git checkout -q FETCH_HEAD; then
+                  echo "SUCCESS: Checked out available ref"
+                else
+                  echo "ERROR: Failed to checkout any ref for $URL"
+                  exit 1
+                fi
+              fi
             fi
             
             if [ "$RECURSIVE" == "true" ]; then
               git submodule update --init --recursive --depth 1 2>/dev/null || echo "Submodule update failed for $DEST"
             fi
+            
+            if [ -z "$(ls -A .)" ]; then echo "ERROR: $DEST is empty!"; exit 1; fi
             cd - > /dev/null
           }
 
@@ -108,17 +123,14 @@ jobs:
           
           echo "Cloning WebRTC and tgvoip dependencies..."
           mkdir -p app/jni/tgvoip/third_party
-          # Specific commit for WebRTC as per BuildWebRTC.cmake
-          ensure_version "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "e3dfe44d1aea15a1aabded19d71884412e772245" "true"
-          # Specific commit for tgcalls as per BuildTgCalls.cmake
-          ensure_version "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "c89f009c29e7142f1935383a978f2ad7c46da4d1" "true"
+          ensure_version "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
+          ensure_version "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "development" "true"
           ensure_version "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           ensure_version "https://github.com/TGX-Android/libevent" "app/jni/tgvoip/third_party/libevent" "release-2.1.12-stable" "false"
           ensure_version "https://github.com/google/crc32c" "app/jni/tgvoip/third_party/crc32c" "1.1.2" "false"
           ensure_version "https://github.com/xiph/rnnoise" "app/jni/tgvoip/third_party/rnnoise" "master" "false"
           ensure_version "https://github.com/sctplab/usrsctp" "app/jni/tgvoip/third_party/usrsctp" "0.9.5.0" "false"
-          # Specific commit for libsrtp as per BuildLibSRTP.cmake
-          ensure_version "https://github.com/cisco/libsrtp" "app/jni/tgvoip/third_party/libsrtp" "860492290f7d1f25e2bd45da6471bfd4cd4d7add" "false"
+          ensure_version "https://github.com/cisco/libsrtp" "app/jni/tgvoip/third_party/libsrtp" "v2.4.2" "false"
           ensure_version "https://github.com/cisco/openh264" "app/jni/tgvoip/third_party/openh264" "v2.4.1" "false"
           ensure_version "https://github.com/abseil/abseil-cpp" "app/jni/tgvoip/third_party/abseil-cpp" "20210324.2" "false"
           
@@ -150,15 +162,13 @@ jobs:
 
           echo "Eliminating legacy build files..."
           find . -name "build.gradle" -type f | while read f; do
-            if [ -f "${f}.kts" ]; then
-              rm "$f"
-            fi
+            if [ -f "${f}.kts" ]; then rm "$f"; fi
           done
 
           echo "Diagnostic: Final file check"
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
-          ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || echo "libsrtp stat.c MISSING"
-          ls -l app/jni/tgvoip/third_party/tgcalls/tgcalls/legacy/InstanceImplLegacy.cpp || echo "tgcalls source MISSING"
+          ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || ls -R app/jni/tgvoip/third_party/libsrtp | head -n 20
+          ls -l app/jni/tgvoip/third_party/tgcalls/tgcalls/legacy/InstanceImplLegacy.cpp || ls -R app/jni/tgvoip/third_party/tgcalls | head -n 20
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -200,11 +210,9 @@ jobs:
                   with open(path, "w") as f: f.write(content.replace(search, replace))
                   print(f"Patched {path}")
 
-          # Fix typos and pipe issues
           patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
           patch_file("scripts/setup-sdk.sh", "yes |", "echo y |")
           
-          # Inject skip logic for non-ARM64/Latest
           def inject_skip(path, marker, skip_line):
               if not os.path.exists(path): return
               with open(path, "r") as f: lines = f.readlines()
@@ -216,19 +224,17 @@ jobs:
           inject_skip("scripts/private/build-ffmpeg-impl.sh", "function build_one {", "  if [[ \"$FLAVOR\" != \"latest\" ]] || [[ \"$PLATFORM\" != \"arm64-v8a\" ]]; then return 0; fi")
           inject_skip("scripts/private/build-vpx-impl.sh", "configure_make() {", "  if [[ \"$1\" != \"latest\" ]] || [[ \"$2\" != \"arm64-v8a\" ]]; then return 0; fi")
           
-          # Fix libyuv missing MSA files in BuildYuv.cmake
           yuv_cmake = "app/jni/BuildYuv.cmake"
           if os.path.exists(yuv_cmake):
               with open(yuv_cmake, "r") as f: lines = f.readlines()
               with open(yuv_cmake, "w") as f:
                   for line in lines:
-                      if "_msa.cc" in line:
+                      if any(x in line for x in ["_msa.cc", "_lsx.cc", "_rvv.cc", "_lasx.cc"]):
                           f.write("# " + line)
                       else:
                           f.write(line)
-              print(f"Patched {yuv_cmake} to disable MSA files")
+              print(f"Patched {yuv_cmake}")
           
-          # Disable strict OpenSSL version check in app/build.gradle.kts
           app_gradle = "app/build.gradle.kts"
           if os.path.exists(app_gradle):
               with open(app_gradle, "r") as f: content = f.read()

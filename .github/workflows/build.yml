@@ -46,92 +46,85 @@ jobs:
           git config --global --unset-all http.https://github.com/.extraheader || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # Function to clone a repo safely
-          ensure_repo() {
+          # Function to clone a specific version of a repo
+          # Usage: ensure_version URL DEST REF (branch or commit) RECURSIVE
+          ensure_version() {
             local URL=$1
             local DEST=$2
-            local BRANCH=$3
+            local REF=$3
             local RECURSIVE=$4
             
             # PROTECT tracked directories
             if [[ "$DEST" == "tgcalls" ]] || [[ "$DEST" == "app/jni/third_party/androidx-media" ]]; then
-              echo "Skipping tracked directory $DEST"
+              echo "Preserving tracked directory: $DEST"
               return 0
             fi
             
-            echo "--- Ensuring $DEST from $URL (branch: $BRANCH) ---"
+            echo "--- Ensuring $DEST from $URL ($REF) ---"
             rm -rf "$DEST"
-            mkdir -p "$(dirname "$DEST")"
+            mkdir -p "$DEST"
+            cd "$DEST"
+            git init -q
+            git remote add origin "$URL"
             
-            local BASE_ARGS="--depth 1"
-            if [ "$RECURSIVE" == "true" ]; then BASE_ARGS="$BASE_ARGS --recursive"; fi
-            
-            # Attempt 1: Specified branch
-            if [ -n "$BRANCH" ]; then
-              echo "Attempting clone branch $BRANCH..."
-              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST" 2>/dev/null; then
-                echo "SUCCESS: Cloned $BRANCH"
-                return 0
-              fi
-              echo "FAILED to clone branch $BRANCH, trying default branch..."
+            # Try to fetch the specific REF (commit or branch)
+            if git fetch --depth 1 origin "$REF" 2>/dev/null; then
+              git checkout -q FETCH_HEAD
+              echo "SUCCESS: Fetched $REF"
+            else
+              echo "Ref $REF failed, fetching default branch..."
+              git fetch --depth 1 origin 2>/dev/null
+              git checkout -q FETCH_HEAD
             fi
             
-            # Attempt 2: Default branch
-            if git clone $BASE_ARGS "$URL" "$DEST" 2>/dev/null; then
-              echo "SUCCESS: Cloned default branch"
-              return 0
+            if [ "$RECURSIVE" == "true" ]; then
+              git submodule update --init --recursive --depth 1 2>/dev/null || echo "Submodule update failed for $DEST"
             fi
-            
-            # Attempt 3: Full clone
-            rm -rf "$DEST"
-            if git clone "$URL" "$DEST" 2>/dev/null; then
-              echo "SUCCESS: Full clone"
-              return 0
-            fi
-            
-            echo "ERROR: All clone attempts failed for $URL"
-            return 1
+            cd - > /dev/null
           }
 
           echo "Cloning core dependencies..."
-          ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true" 
+          ensure_version "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
           
           mkdir -p vkryl
-          ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
-          ensure_repo "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
-          ensure_repo "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
-          ensure_repo "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
+          ensure_version "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
+          ensure_version "https://github.com/TGX-Android/X-Core" "vkryl/core" "main" "false"
+          ensure_version "https://github.com/TGX-Android/tdlib-utils" "vkryl/td" "main" "false"
+          ensure_version "https://github.com/TGX-Android/X-Android" "vkryl/android" "main" "false"
           
           echo "Cloning native dependencies..."
           mkdir -p app/jni/third_party
-          ensure_repo "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "" "false"
-          ensure_repo "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "release/6.1" "false"
-          ensure_repo "https://github.com/xiph/opus" "app/jni/third_party/opus" "" "false"
-          ensure_repo "https://github.com/xiph/flac" "app/jni/third_party/flac" "" "false"
-          ensure_repo "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "" "false"
-          ensure_repo "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "" "false"
-          ensure_repo "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
-          ensure_repo "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
-          ensure_repo "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "1.4.0" "false"
-          ensure_repo "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
-          ensure_repo "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
+          ensure_version "https://github.com/webmproject/libvpx" "app/jni/third_party/libvpx" "v1.13.1" "false"
+          ensure_version "https://github.com/FFmpeg/FFmpeg" "app/jni/third_party/ffmpeg" "n6.1" "false"
+          ensure_version "https://github.com/xiph/opus" "app/jni/third_party/opus" "v1.4" "false"
+          ensure_version "https://github.com/xiph/flac" "app/jni/third_party/flac" "1.4.3" "false"
+          ensure_version "https://github.com/xiph/ogg" "app/jni/third_party/ogg" "v1.3.5" "false"
+          ensure_version "https://github.com/xiph/opusfile" "app/jni/third_party/opusfile" "v0.12" "false"
+          ensure_version "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
+          ensure_version "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
+          ensure_version "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "v1.3.2" "false"
+          ensure_version "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "refs/heads/master" "false"
+          ensure_version "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "v1.9.4" "false"
           
           echo "Cloning WebRTC and tgvoip dependencies..."
           mkdir -p app/jni/tgvoip/third_party
-          ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
-          ensure_repo "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "development" "true"
-          ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
-          ensure_repo "https://github.com/TGX-Android/libevent" "app/jni/tgvoip/third_party/libevent" "main" "false"
-          ensure_repo "https://github.com/google/crc32c" "app/jni/tgvoip/third_party/crc32c" "main" "false"
-          ensure_repo "https://github.com/TGX-Android/rnnoise" "app/jni/tgvoip/third_party/rnnoise" "main" "false"
-          ensure_repo "https://github.com/sctplab/usrsctp" "app/jni/tgvoip/third_party/usrsctp" "master" "false"
-          ensure_repo "https://github.com/cisco/libsrtp" "app/jni/tgvoip/third_party/libsrtp" "main" "false"
-          ensure_repo "https://github.com/cisco/openh264" "app/jni/tgvoip/third_party/openh264" "master" "false"
-          ensure_repo "https://github.com/abseil/abseil-cpp" "app/jni/tgvoip/third_party/abseil-cpp" "master" "false"
+          # Specific commit for WebRTC as per BuildWebRTC.cmake
+          ensure_version "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "e3dfe44d1aea15a1aabded19d71884412e772245" "true"
+          # Specific commit for tgcalls as per BuildTgCalls.cmake
+          ensure_version "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "c89f009c29e7142f1935383a978f2ad7c46da4d1" "true"
+          ensure_version "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
+          ensure_version "https://github.com/TGX-Android/libevent" "app/jni/tgvoip/third_party/libevent" "release-2.1.12-stable" "false"
+          ensure_version "https://github.com/google/crc32c" "app/jni/tgvoip/third_party/crc32c" "1.1.2" "false"
+          ensure_version "https://github.com/xiph/rnnoise" "app/jni/tgvoip/third_party/rnnoise" "master" "false"
+          ensure_version "https://github.com/sctplab/usrsctp" "app/jni/tgvoip/third_party/usrsctp" "0.9.5.0" "false"
+          # Specific commit for libsrtp as per BuildLibSRTP.cmake
+          ensure_version "https://github.com/cisco/libsrtp" "app/jni/tgvoip/third_party/libsrtp" "860492290f7d1f25e2bd45da6471bfd4cd4d7add" "false"
+          ensure_version "https://github.com/cisco/openh264" "app/jni/tgvoip/third_party/openh264" "v2.4.1" "false"
+          ensure_version "https://github.com/abseil/abseil-cpp" "app/jni/tgvoip/third_party/abseil-cpp" "20210324.2" "false"
           
           mkdir -p app/jni/tgvoip/third_party/webrtc_deps
-          ensure_repo "https://chromium.googlesource.com/chromium/src/base" "app/jni/tgvoip/third_party/webrtc_deps/base" "main" "false"
-          ensure_repo "https://chromium.googlesource.com/chromium/src/third_party" "app/jni/tgvoip/third_party/webrtc_deps/third_party" "main" "false"
+          ensure_version "https://chromium.googlesource.com/chromium/src/base" "app/jni/tgvoip/third_party/webrtc_deps/base" "refs/heads/main" "false"
+          ensure_version "https://chromium.googlesource.com/chromium/src/third_party" "app/jni/tgvoip/third_party/webrtc_deps/third_party" "refs/heads/main" "false"
           
           echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
           mkdir -p thirdparty/WebRTC/src
@@ -140,19 +133,19 @@ jobs:
           fi
           
           mkdir -p thirdparty/androidx-media
-          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
-          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/latest" "release" "false"
-          ensure_repo "https://github.com/androidx/media" "thirdparty/androidx-media/lollipop" "release" "false"
+          ensure_version "https://github.com/androidx/media" "thirdparty/androidx-media/legacy" "release" "false"
+          ensure_version "https://github.com/androidx/media" "thirdparty/androidx-media/latest" "release" "false"
+          ensure_version "https://github.com/androidx/media" "thirdparty/androidx-media/lollipop" "release" "false"
 
           echo "Fixing internal submodules..."
           if [ ! -f "tdlib/source/openssl/include/openssl/opensslv.h" ]; then
-            ensure_repo "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
+            ensure_version "https://github.com/openssl/openssl" "tdlib/source/openssl" "OpenSSL_1_1_1-stable" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/leveldb/CMakeLists.txt" ]; then
-            ensure_repo "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "" "false"
+            ensure_version "https://github.com/google/leveldb" "vkryl/leveldb/jni/leveldb" "v1.23" "false"
           fi
           if [ ! -f "vkryl/leveldb/jni/jni-utils/CMakeLists.txt" ]; then
-            ensure_repo "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
+            ensure_version "https://github.com/TGX-Android/jni-utils" "vkryl/leveldb/jni/jni-utils" "main" "false"
           fi
 
           echo "Eliminating legacy build files..."
@@ -164,8 +157,8 @@ jobs:
 
           echo "Diagnostic: Final file check"
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
-          ls -l app/jni/third_party/androidx-media/latest/opus_jni.cc || echo "opus_jni.cc MISSING"
           ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || echo "libsrtp stat.c MISSING"
+          ls -l app/jni/tgvoip/third_party/tgcalls/tgcalls/legacy/InstanceImplLegacy.cpp || echo "tgcalls source MISSING"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties

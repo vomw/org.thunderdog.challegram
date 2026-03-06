@@ -110,7 +110,8 @@ open class ModulePlugin : Plugin<Project> {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
                   "-DANDROID_PLATFORM=android-${variant.minSdk}",
-                  "-DTGX_FLAVOR=${variant.flavor}"
+                  "-DTGX_FLAVOR=${variant.flavor}",
+                  "-DINSTALL_MANPAGES=OFF"
                 )
               }
             }

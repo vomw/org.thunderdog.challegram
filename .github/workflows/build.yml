@@ -54,29 +54,46 @@ jobs:
             local RECURSIVE=$4
             
             echo "--- Ensuring $DEST from $URL (branch: $BRANCH) ---"
-            rm -rf "$DEST"
-            mkdir -p "$(dirname "$DEST")"
+            
+            # If DEST is tracked in git, we should NOT rm -rf it if it contains files we need
+            # However, since we are doing a fresh checkout with submodules=false, 
+            # these directories should only contain what is in the main repo.
+            
+            # Special case: if DEST is 'tgcalls', we only want to clone into a subfolder or 
+            # handle it carefully. But wait, .gitmodules says tgcalls path is app/jni/tgvoip/third_party/tgcalls.
+            # So cloning into 'tgcalls' was the mistake. 
+            
+            if [ -d "$DEST" ] && [ "$(ls -A "$DEST" 2>/dev/null)" ]; then
+              echo "Directory $DEST already exists and is not empty. Checking for tracked files..."
+              # If it's a submodule path, we can safely overwrite. 
+              # If it's a root module with its own build.gradle.kts, we must be careful.
+            else
+              mkdir -p "$(dirname "$DEST")"
+            fi
             
             local BASE_ARGS="--depth 1"
             if [ "$RECURSIVE" == "true" ]; then BASE_ARGS="$BASE_ARGS --recursive"; fi
             
+            # Attempt 1: Specified branch
             if [ -n "$BRANCH" ]; then
               echo "Attempting clone branch $BRANCH..."
-              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST"; then
+              if git clone $BASE_ARGS -b "$BRANCH" "$URL" "$DEST" 2>/dev/null; then
                 echo "SUCCESS: Cloned $BRANCH"
                 return 0
               fi
               echo "FAILED to clone branch $BRANCH, trying default branch..."
             fi
             
-            if git clone $BASE_ARGS "$URL" "$DEST"; then
+            # Attempt 2: Default branch
+            if git clone $BASE_ARGS "$URL" "$DEST" 2>/dev/null; then
               echo "SUCCESS: Cloned default branch"
               return 0
             fi
             
+            # Attempt 3: Full clone
             echo "Shallow clone failed, trying full clone..."
             rm -rf "$DEST"
-            if git clone "$URL" "$DEST"; then
+            if git clone "$URL" "$DEST" 2>/dev/null; then
               echo "SUCCESS: Full clone"
               return 0
             fi
@@ -87,8 +104,6 @@ jobs:
 
           echo "Cloning core dependencies..."
           ensure_repo "https://github.com/TGX-Android/tdlib" "tdlib" "main" "true"
-          # tgcalls default branch is 'development'
-          ensure_repo "https://github.com/TGX-Android/tgcalls" "tgcalls" "development" "true"
           
           mkdir -p vkryl
           ensure_repo "https://github.com/TGX-Android/leveldb" "vkryl/leveldb" "main" "true"
@@ -110,9 +125,10 @@ jobs:
           ensure_repo "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "" "false"
           ensure_repo "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "" "false"
           
-          echo "Cloning WebRTC for tgcalls..."
+          echo "Cloning WebRTC and tgcalls native source..."
           mkdir -p app/jni/tgvoip/third_party
           ensure_repo "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
+          ensure_repo "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "development" "true"
           ensure_repo "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           
           mkdir -p thirdparty/WebRTC/src
@@ -139,12 +155,12 @@ jobs:
           echo "Eliminating legacy build files..."
           find . -name "build.gradle" -type f | while read f; do
             if [ -f "${f}.kts" ]; then
-              rm -v "$f"
+              rm "$f"
             fi
           done
 
           echo "Diagnostic: Final file check"
-          ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS STILL MISSING"
+          ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
 
       # 5. Pre-configure local.properties
       - name: Create local.properties

@@ -9,9 +9,6 @@ import com.android.build.gradle.ProguardFiles
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.tasks.compile.JavaCompile
-import tgx.gradle.getIntOrThrow
-import tgx.gradle.getOrThrow
-import tgx.gradle.loadProperties
 import java.io.File
 import java.util.Properties
 
@@ -42,8 +39,6 @@ open class ModulePlugin : Plugin<Project> {
           null
         }
         
-        project.logger.lifecycle("ModulePlugin: config found for ${project.path}? ${config != null}")
-        
         if (config != null) {
           compileSdkVersionValue = config.compileSdkVersion
           buildToolsVersionValue = config.buildToolsVersion
@@ -51,12 +46,14 @@ open class ModulePlugin : Plugin<Project> {
           targetSdkVersionValue = config.targetSdkVersion
         } else {
           val versionsFile = File(project.rootProject.projectDir, "version.properties")
-          project.logger.lifecycle("ModulePlugin: Loading versions from ${versionsFile.absolutePath}")
-          val versions = if (versionsFile.exists()) loadProperties(versionsFile.absolutePath) else Properties()
-          compileSdkVersionValue = if (versionsFile.exists()) versions.getIntOrThrow("version.sdk_compile") else 35
-          buildToolsVersionValue = if (versionsFile.exists()) versions.getOrThrow("version.build_tools") else "35.0.0"
-          targetSdkVersionValue = if (versionsFile.exists()) versions.getIntOrThrow("version.sdk_target") else 35
-          legacyNdkVersionValue = if (versionsFile.exists()) versions.getOrThrow("version.ndk_legacy") else "26.3.11579264"
+          val props = Properties()
+          if (versionsFile.exists()) {
+            versionsFile.inputStream().use { props.load(it) }
+          }
+          compileSdkVersionValue = props.getProperty("version.sdk_compile")?.toInt() ?: 35
+          buildToolsVersionValue = props.getProperty("version.build_tools") ?: "35.0.0"
+          targetSdkVersionValue = props.getProperty("version.sdk_target")?.toInt() ?: 35
+          legacyNdkVersionValue = props.getProperty("version.ndk_legacy") ?: "26.3.11579264"
         }
 
         compileSdkVersion(compileSdkVersionValue)
@@ -71,7 +68,7 @@ open class ModulePlugin : Plugin<Project> {
           targetCompatibility = Config.JAVA_VERSION
         }
         
-        // Add dependency to coreLibraryDesugaring. Configuration is created by AGP when isCoreLibraryDesugaringEnabled is true.
+        // AGP creates coreLibraryDesugaring configuration if isCoreLibraryDesugaringEnabled is true
         project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
         testOptions {
@@ -106,12 +103,10 @@ open class ModulePlugin : Plugin<Project> {
         }
 
         if (this is LibraryExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as Library")
-          flavorDimensions.add("SDK")
+          flavorDimensions += "SDK"
           productFlavors {
             Sdk.VARIANTS.forEach { (_, variant) ->
-              project.logger.lifecycle("ModulePlugin: Registering flavor ${variant.flavor} for ${project.path}")
-              create(variant.flavor) {
+              maybeCreate(variant.flavor).apply {
                 dimension = "SDK"
                 externalNativeBuild.cmake.arguments(
                   "-DANDROID_PLATFORM=android-${variant.minSdk}",
@@ -124,7 +119,6 @@ open class ModulePlugin : Plugin<Project> {
             consumerProguardFiles("consumer-rules.pro")
           }
         } else if (this is AppExtension) {
-          project.logger.lifecycle("ModulePlugin: Configuring ${project.path} as App")
           config?.keystore?.let { keystore ->
             signingConfigs {
               arrayOf(

@@ -1,0 +1,140 @@
+name: Build & Sign Telegram X APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  build:
+    name: Build Signed APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # Native compilation takes a long time
+
+    steps:
+      # ─── 1. Checkout with ALL submodules ───────────────────────────────────
+      - name: Checkout repository (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # ─── 2. Java 17 ────────────────────────────────────────────────────────
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      # ─── 3. Android SDK + NDK + CMake ──────────────────────────────────────
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and CMake
+        run: |
+          sdkmanager --install \
+            "ndk;27.2.12479018" \
+            "cmake;3.22.1" \
+            "build-tools;34.0.0" \
+            "platforms;android-34"
+
+      # ─── 4. Cache native build outputs (saves ~30 min on repeat runs) ──────
+      - name: Cache native libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            app/.cxx
+            app/jni/build
+            app/src/main/libs
+          key: native-${{ runner.os }}-${{ hashFiles('**/*.cmake', '**/CMakeLists.txt', 'app/jni/**') }}
+          restore-keys: |
+            native-${{ runner.os }}-
+
+      # ─── 5. Write local.properties ─────────────────────────────────────────
+      - name: Configure local.properties
+        run: |
+          cat > local.properties <<EOF
+          sdk.dir=$ANDROID_SDK_ROOT
+          ndk.dir=$ANDROID_SDK_ROOT/ndk/27.2.12479018
+          telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
+          telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
+          EOF
+
+      # ─── 6. Decode & write the signing keystore ────────────────────────────
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+
+      # ─── 7. Gradle performance tweaks ──────────────────────────────────────
+      - name: Configure Gradle JVM args
+        run: |
+          mkdir -p ~/.gradle
+          cat >> ~/.gradle/gradle.properties <<EOF
+          org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
+          org.gradle.parallel=true
+          org.gradle.caching=true
+          android.useAndroidX=true
+          EOF
+
+      # ─── 8. Grant execute permission ───────────────────────────────────────
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # ─── 9. Prepare / compile native dependencies ──────────────────────────
+      - name: Prepare native dependencies
+        run: ./gradlew prepareReleaseDependencies --stacktrace
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+
+      # ─── 10. Build the release APK ─────────────────────────────────────────
+      - name: Build release APK
+        run: ./gradlew assembleRelease --stacktrace
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+
+      # ─── 11. Sign the APK with apksigner ───────────────────────────────────
+      - name: Sign APK
+        run: |
+          APK_PATH=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+          echo "Found APK at: $APK_PATH"
+
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner sign \
+            --ks keystore.jks \
+            --ks-pass pass:${{ secrets.KEYSTORE_PASSWORD }} \
+            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
+            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            --out app-release-signed.apk \
+            "$APK_PATH"
+
+          echo "APK signed successfully."
+
+      # ─── 12. Verify the signature ──────────────────────────────────────────
+      - name: Verify APK signature
+        run: |
+          $ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner verify \
+            --verbose app-release-signed.apk
+
+      # ─── 13. Upload APK as artifact ────────────────────────────────────────
+      - name: Upload signed APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-x-signed-${{ github.run_number }}
+          path: app-release-signed.apk
+          retention-days: 30
+
+      # ─── 14. (Optional) Create a GitHub Release on version tags ───────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-release-signed.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

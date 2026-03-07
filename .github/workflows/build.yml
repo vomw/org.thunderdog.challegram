@@ -97,7 +97,7 @@ jobs:
                 fi
                 # Try fetching everything and then checkout
                 if git fetch origin 2>/dev/null; then
-                  if git checkout -q "$REF" 2>/dev/null; then
+                  if git checkout -q "$REF" 2>/dev/null || git checkout -q FETCH_HEAD; then
                     SUCCESS=1; break
                   fi
                 fi
@@ -138,13 +138,12 @@ jobs:
           ensure_version "https://github.com/TGX-Android/jni-utils" "app/jni/third_party/jni-utils" "main" "false"
           ensure_version "https://github.com/TGX-Android/rlottie" "app/jni/third_party/rlottie" "main" "false"
           ensure_version "https://github.com/webmproject/libwebp" "app/jni/third_party/webp" "v1.3.2" "false"
-          ensure_version "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "refs/heads/master" "false"
+          ensure_version "https://chromium.googlesource.com/libyuv/libyuv" "app/jni/third_party/libyuv" "main" "false"
           ensure_version "https://github.com/lz4/lz4" "app/jni/third_party/lz4" "v1.9.4" "false"
           
           echo "Cloning WebRTC and tgvoip dependencies..."
           mkdir -p app/jni/tgvoip/third_party
           ensure_version "https://github.com/TGX-Android/webrtc" "app/jni/tgvoip/third_party/webrtc" "telegram" "true"
-          # Using development branch for tgcalls fork
           ensure_version "https://github.com/TGX-Android/tgcalls" "app/jni/tgvoip/third_party/tgcalls" "development" "true"
           ensure_version "https://github.com/TGX-Android/libtgvoip" "app/jni/tgvoip/third_party/libtgvoip" "tgx" "false"
           ensure_version "https://github.com/TGX-Android/libevent" "app/jni/tgvoip/third_party/libevent" "release-2.1.12-stable" "false"
@@ -157,8 +156,8 @@ jobs:
           ensure_version "https://github.com/abseil/abseil-cpp" "app/jni/tgvoip/third_party/abseil-cpp" "20210324.2" "false"
           
           mkdir -p app/jni/tgvoip/third_party/webrtc_deps
-          ensure_version "https://chromium.googlesource.com/chromium/src/base" "app/jni/tgvoip/third_party/webrtc_deps/base" "refs/heads/main" "false"
-          ensure_version "https://chromium.googlesource.com/chromium/src/third_party" "app/jni/tgvoip/third_party/webrtc_deps/third_party" "refs/heads/main" "false"
+          ensure_version "https://chromium.googlesource.com/chromium/src/base" "app/jni/tgvoip/third_party/webrtc_deps/base" "main" "false"
+          ensure_version "https://chromium.googlesource.com/chromium/src/third_party" "app/jni/tgvoip/third_party/webrtc_deps/third_party" "main" "false"
           
           echo "Syncing WebRTC source to thirdparty/WebRTC/src..."
           mkdir -p thirdparty/WebRTC/src
@@ -189,9 +188,9 @@ jobs:
 
           echo "Diagnostic: Final file check"
           ls -l tgcalls/build.gradle.kts || echo "tgcalls KTS MISSING"
-          ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || echo "libsrtp stat.c MISSING"
-          ls -l app/jni/tgvoip/third_party/tgcalls/tgcalls/legacy/InstanceImplLegacy.cpp || echo "tgcalls source MISSING"
-          ls -l app/jni/tgvoip/third_party/rnnoise/src/rnn.c || echo "rnnoise source MISSING"
+          ls -l app/jni/tgvoip/third_party/libsrtp/crypto/math/stat.c || ls -R app/jni/tgvoip/third_party/libsrtp | head -n 20
+          ls -l app/jni/tgvoip/third_party/tgcalls/tgcalls/legacy/InstanceImplLegacy.cpp || ls -R app/jni/tgvoip/third_party/tgcalls | head -n 20
+          ls -l app/jni/tgvoip/third_party/rnnoise/src/rnn.c || ls -R app/jni/tgvoip/third_party/rnnoise | head -n 20
 
       # 5. Pre-configure local.properties
       - name: Create local.properties
@@ -233,9 +232,11 @@ jobs:
                   with open(path, "w") as f: f.write(content.replace(search, replace))
                   print(f"Patched {path}")
 
+          # Fix typos and pipe issues
           patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
           patch_file("scripts/setup-sdk.sh", "yes |", "echo y |")
           
+          # Inject skip logic for non-ARM64/Latest
           def inject_skip(path, marker, skip_line):
               if not os.path.exists(path): return
               with open(path, "r") as f: lines = f.readlines()
@@ -247,17 +248,20 @@ jobs:
           inject_skip("scripts/private/build-ffmpeg-impl.sh", "function build_one {", "  if [[ \"$FLAVOR\" != \"latest\" ]] || [[ \"$PLATFORM\" != \"arm64-v8a\" ]]; then return 0; fi")
           inject_skip("scripts/private/build-vpx-impl.sh", "configure_make() {", "  if [[ \"$1\" != \"latest\" ]] || [[ \"$2\" != \"arm64-v8a\" ]]; then return 0; fi")
           
+          # Fix libyuv missing architecture-specific files in BuildYuv.cmake
           yuv_cmake = "app/jni/BuildYuv.cmake"
           if os.path.exists(yuv_cmake):
               with open(yuv_cmake, "r") as f: lines = f.readlines()
               with open(yuv_cmake, "w") as f:
                   for line in lines:
+                      # Disable files that are frequently missing in older or shallow clones
                       if any(x in line for x in ["_msa.cc", "_lsx.cc", "_rvv.cc", "_lasx.cc"]):
                           f.write("# " + line)
                       else:
                           f.write(line)
-              print(f"Patched {yuv_cmake}")
+              print(f"Patched {yuv_cmake} to disable architecture-specific files")
           
+          # Disable strict OpenSSL version check in app/build.gradle.kts
           app_gradle = "app/build.gradle.kts"
           if os.path.exists(app_gradle):
               with open(app_gradle, "r") as f: content = f.read()

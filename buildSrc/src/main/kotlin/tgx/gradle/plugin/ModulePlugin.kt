@@ -15,14 +15,14 @@ import java.util.Properties
 open class ModulePlugin : Plugin<Project> {
   override fun apply(project: Project) {
     project.logger.lifecycle("ModulePlugin: Applying to ${project.path}")
-    
+
     val androidExt = try {
         project.extensions.getByName("android")
     } catch (e: Exception) {
         project.logger.lifecycle("ModulePlugin: Extension 'android' NOT FOUND for ${project.path}")
         return
     }
-    
+
     if (androidExt is BaseExtension) {
       androidExt.apply {
         var compileSdkVersionValue: Int
@@ -38,7 +38,7 @@ open class ModulePlugin : Plugin<Project> {
           project.logger.lifecycle("ModulePlugin: Error retrieving config for ${project.path}: ${e.message}")
           null
         }
-        
+
         if (config != null) {
           compileSdkVersionValue = config.compileSdkVersion
           buildToolsVersionValue = config.buildToolsVersion
@@ -67,7 +67,7 @@ open class ModulePlugin : Plugin<Project> {
           sourceCompatibility = Config.JAVA_VERSION
           targetCompatibility = Config.JAVA_VERSION
         }
-        
+
         // AGP creates coreLibraryDesugaring configuration if isCoreLibraryDesugaringEnabled is true
         project.dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:2.1.5")
 
@@ -136,7 +136,7 @@ open class ModulePlugin : Plugin<Project> {
 
             buildTypes {
               getByName("debug") {
-                signingConfig = signingConfigs.getByName("debug")
+                signingConfig = signingConfigs["debug"]
                 isDebuggable = true
                 isJniDebuggable = true
                 isMinifyEnabled = false
@@ -153,7 +153,7 @@ open class ModulePlugin : Plugin<Project> {
               }
 
               getByName("release") {
-                signingConfig = signingConfigs.getByName("release")
+                signingConfig = signingConfigs["release"]
                 isMinifyEnabled = !config.doNotObfuscate
                 isShrinkResources = !config.doNotObfuscate
                 ndk.debugSymbolLevel = "full"

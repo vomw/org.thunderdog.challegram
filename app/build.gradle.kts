@@ -105,7 +105,7 @@ android {
     var openSslVersionFull = ""
     val openSslVersionFile = File(project.rootDir.absoluteFile, "tdlib/source/openssl/include/openssl/opensslv.h")
     openSslVersionFile.bufferedReader().use { reader ->
-      val regex = Regex("^#\\s*define OPENSSL_VERSION_NUMBER\\s*((?:0x)[0-9a-fAF]+)L?\$")
+      val regex = Regex("^#\\s*define OPENSSL_VERSION_NUMBER\\s*((?:0x)[0-9a-fAF]+)L?$")
       while (true) {
         val line = reader.readLine() ?: break
         val result = regex.find(line)
@@ -139,7 +139,7 @@ android {
     val tdlibCommit = File(project.rootDir.absoluteFile, "tdlib/version.txt").bufferedReader().readLine().take(7)
     val tdlibVersionFile = File(project.rootDir.absoluteFile, "tdlib/source/td/CMakeLists.txt")
     tdlibVersionFile.bufferedReader().use { reader ->
-      val regex = Regex("^project\\(TDLib VERSION (\\d+\\.\\d+\\.\\d+) LANGUAGES CXX C\\)$")
+      val regex = Regex("^project\(TDLib VERSION (\\d+\\.\\d+\\.\\d+) LANGUAGES CXX C\)$")
       while (true) {
         val line = reader.readLine() ?: break
         val result = regex.find(line)
@@ -172,23 +172,23 @@ android {
     buildConfigLong("COMMIT_DATE", tgxGit.commitDate)
     buildConfigString("SOURCES_URL", sourcesUrl)
 
-    buildConfigField("long[]", "PULL_REQUEST_ID", "{${
-      config.pullRequests.joinToString(", ") { it.id.toString() }
+    buildConfigField("long[]", "PULL_REQUEST_ID", "{${ 
+      config.pullRequests.joinToString(", ") { it.id.toString() } 
     }}")
-    buildConfigField("long[]", "PULL_REQUEST_COMMIT_DATE", "{${
-      config.pullRequests.joinToString(", ") { it.commitDate.toString() }
+    buildConfigField("long[]", "PULL_REQUEST_COMMIT_DATE", "{${ 
+      config.pullRequests.joinToString(", ") { it.commitDate.toString() } 
     }}")
-    buildConfigField("String[]", "PULL_REQUEST_COMMIT", "{${
-      config.pullRequests.joinToString(", ") { "\"${it.commitShort}\"" }
+    buildConfigField("String[]", "PULL_REQUEST_COMMIT", "{${ 
+      config.pullRequests.joinToString(", ") { "\"${it.commitShort}\"" } 
     }}")
-    buildConfigField("String[]", "PULL_REQUEST_COMMIT_FULL", "{${
-      config.pullRequests.joinToString(", ") { "\"${it.commitLong}\"" }
+    buildConfigField("String[]", "PULL_REQUEST_COMMIT_FULL", "{${ 
+      config.pullRequests.joinToString(", ") { "\"${it.commitLong}\"" } 
     }}")
-    buildConfigField("String[]", "PULL_REQUEST_URL", "{${
-      config.pullRequests.joinToString(", ") { "\"${tgxGit.remoteUrl}/pull/${it.id}/files/${it.commitLong}\"" }
+    buildConfigField("String[]", "PULL_REQUEST_URL", "{${ 
+      config.pullRequests.joinToString(", ") { "\"${tgxGit.remoteUrl}/pull/${it.id}/files/${it.commitLong}\"" } 
     }}")
-    buildConfigField("String[]", "PULL_REQUEST_AUTHOR", "{${
-      config.pullRequests.joinToString(", ") { "\"${it.author}\"" }
+    buildConfigField("String[]", "PULL_REQUEST_AUTHOR", "{${ 
+      config.pullRequests.joinToString(", ") { "\"${it.author}\"" } 
     }}")
 
     // WebRTC version
@@ -415,24 +415,24 @@ android {
       }
     }.toString()
 
-    val fileName = "${config.outputFileNamePrefix}-${versionNameOverride.replace(Regex("-universal(?=-|$)"), "")}"
+    val fileName = "${config.outputFileNamePrefix}-${versionNameOverride.replace(Regex("-universal(?=-|$"), "")}"
 
     buildConfigField("int", "ORIGINAL_VERSION_CODE", versionCode.toString())
     buildConfigField("int", "ABI", abi.toString())
     buildConfigField("String", "ORIGINAL_VERSION_NAME", "\"${versionName}.${defaultConfig.versionCode}\"")
     buildConfigField("String", "RECAPTCHA_VERSION", "\"${recaptchaVersion}\"")
 
-    outputs.map { it as ApkVariantOutputImpl }.forEach { output ->
-      output.versionCodeOverride = versionCodeOverride
-      output.versionNameOverride = versionNameOverride
-      output.outputFileName = "${fileName}.apk"
+    outputs.map { it as ApkVariantOutputImpl }.forEach {
+      it.versionCodeOverride = versionCodeOverride
+      it.versionNameOverride = versionNameOverride
+      it.outputFileName = "${fileName}.apk"
     }
 
     if (buildType.isMinifyEnabled) {
       assembleProvider!!.configure {
         doLast {
-          mappingFileProvider.get().files.forEach { mappingFile ->
-            mappingFile.renameTo(File(mappingFile.parentFile, "${fileName}.txt"))
+          mappingFileProvider.get().files.forEach {
+            it.renameTo(File(it.parentFile, "${fileName}.txt"))
           }
         }
       }

@@ -39,8 +39,8 @@ jobs:
           sdkmanager --install \
             "ndk;27.2.12479018" \
             "cmake;3.22.1" \
-            "build-tools;34.0.0" \
-            "platforms;android-34"
+            "build-tools;35.0.0" \
+            "platforms;android-35"
 
       # ─── 4. Cache native build outputs (saves ~30 min on repeat runs) ──────
       - name: Cache native libraries

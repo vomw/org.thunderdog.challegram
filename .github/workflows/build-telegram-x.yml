@@ -52,7 +52,7 @@ jobs:
             app/.cxx
             app/jni/build
             app/src/main/libs
-          key: native-${{ runner.os }}-${{ hashFiles('**/*.cmake', '**/CMakeLists.txt', 'app/jni/**') }}
+          key: native-${{ runner.os }}-${{ hashFiles('app/jni/**/*.cmake', 'app/jni/**/CMakeLists.txt', 'app/jni/CMakeLists.txt') }}
           restore-keys: |
             native-${{ runner.os }}-
 

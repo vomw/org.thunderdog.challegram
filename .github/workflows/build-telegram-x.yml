@@ -36,8 +36,14 @@ jobs:
 
       - name: Install NDK and Build Tools
         run: |
+          # Dynamically determine required NDK from version.properties
+          chmod +x scripts/*.sh
+          PRIMARY_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || echo "23.2.8568313")
+          LEGACY_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || echo "21.4.7075529")
+          
           yes | sdkmanager --install \
-            "ndk;23.2.8568313" \
+            "ndk;$PRIMARY_NDK" \
+            "ndk;$LEGACY_NDK" \
             "cmake;3.22.1" \
             "build-tools;36.0.0" \
             "platforms;android-36" \
@@ -61,9 +67,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v5-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v6-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v5-${{ runner.os }}-
+            native-v6-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -74,6 +80,8 @@ jobs:
           # 5.1 Git Optimizations
           git config --global http.postBuffer 524288000
           git config --global core.compression 0
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
           # 5.2 Make all scripts executable
@@ -114,7 +122,7 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.4 Surgical Submodule Sync
+          # 5.4 Surgical Submodule Sync (with existence check)
           echo "Starting surgical submodule sync..."
           SUBMODULES=(
             "app/jni/third_party/ffmpeg"
@@ -149,6 +157,12 @@ jobs:
           
           git submodule init
           for sm in "${SUBMODULES[@]}"; do
+            # Check if submodule exists in .gitmodules
+            if ! git config --file .gitmodules --get-regexp "path" | grep -q "$sm"; then
+              echo "Submodule $sm not in .gitmodules, skipping..."
+              continue
+            fi
+            
             echo "Syncing $sm..."
             for i in {1..3}; do
               git submodule update --init --recursive --force --depth 1 "$sm" && break || {
@@ -204,6 +218,7 @@ jobs:
       - name: Decode keystore
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "Generating dummy keystore..."
             keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           else
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks

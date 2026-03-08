@@ -40,7 +40,8 @@ jobs:
             "ndk;23.2.8568313" \
             "cmake;3.22.1" \
             "build-tools;36.0.0" \
-            "platforms;android-36"
+            "platforms;android-36" \
+            "platforms;android-35"
 
       - name: Install System Dependencies
         run: |
@@ -60,22 +61,60 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v4-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v5-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v4-${{ runner.os }}-
+            native-v5-${{ runner.os }}-
 
-      # ─── 5. Complete Setup and Build ───────────────────────────────────────
-      - name: Setup and Build Native Dependencies
+      # ─── 5. Robust Dependency Setup ────────────────────────────────────────
+      - name: Setup Dependencies
         run: |
           set -e
           set -x
           
-          # 5.1 Optimization: Increase Git buffer for large submodules
+          # 5.1 Git Optimizations
           git config --global http.postBuffer 524288000
           git config --global core.compression 0
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.2 Surgical Submodule Sync (Retry-enabled)
+          # 5.2 Make all scripts executable
+          chmod +x scripts/*.sh scripts/private/*.sh
+          
+          # 5.3 Patch scripts
+          python3 -c '
+          import os
+          
+          def patch_file(path, search, replace):
+              if not os.path.exists(path): return
+              with open(path, "r") as f: content = f.read()
+              if search in content:
+                  with open(path, "w") as f: f.write(content.replace(search, replace))
+                  print(f"Patched {path}")
+
+          # Fix set-env.sh typo
+          patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
+          
+          # Force ARM64 Latest build
+          patch_file("scripts/private/build-vpx-impl.sh", "for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do", "for ABI in arm64-v8a ; do")
+          patch_file("scripts/private/build-vpx-impl.sh", "for FLAVOR in latest lollipop legacy ; do", "for FLAVOR in latest ; do")
+          
+          ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
+          if os.path.exists(ffmpeg_script):
+              with open(ffmpeg_script, "r") as f: lines = f.readlines()
+              with open(ffmpeg_script, "w") as f:
+                  done = False
+                  for line in lines:
+                      f.write(line)
+                      if "build_one" in line and not done and "function" not in line:
+                          f.write("exit 0\n")
+                          done = True
+          '
+          
+          # Disable reset.sh to protect cache
+          echo "#!/bin/bash" > scripts/reset.sh
+          echo "echo 'Skipping reset...'" >> scripts/reset.sh
+          chmod +x scripts/reset.sh
+
+          # 5.4 Surgical Submodule Sync
           echo "Starting surgical submodule sync..."
           SUBMODULES=(
             "app/jni/third_party/ffmpeg"
@@ -112,46 +151,15 @@ jobs:
           for sm in "${SUBMODULES[@]}"; do
             echo "Syncing $sm..."
             for i in {1..3}; do
-              git submodule update --init --recursive --depth 1 "$sm" && break || {
-                if [ $i -eq 3 ]; then echo "FAILED to sync $sm"; exit 1; fi
-                echo "Retry $i for $sm..."
+              git submodule update --init --recursive --force --depth 1 "$sm" && break || {
+                if [ $i -eq 3 ]; then echo "Submodule $sm failed!"; exit 1; fi
                 rm -rf "$sm"
                 sleep 15
               }
             done
           done
 
-          # 5.3 Patch scripts for ARM64 Latest build
-          python3 -c '
-          import os
-          
-          def patch_file(path, search, replace):
-              if not os.path.exists(path): return
-              with open(path, "r") as f: content = f.read()
-              if search in content:
-                  with open(path, "w") as f: f.write(content.replace(search, replace))
-                  print(f"Patched {path}")
-
-          patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
-          patch_file("scripts/private/build-vpx-impl.sh", "for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do", "for ABI in arm64-v8a ; do")
-          patch_file("scripts/private/build-vpx-impl.sh", "for FLAVOR in latest lollipop legacy ; do", "for FLAVOR in latest ; do")
-          
-          ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
-          if os.path.exists(ffmpeg_script):
-              with open(ffmpeg_script, "r") as f: lines = f.readlines()
-              with open(ffmpeg_script, "w") as f:
-                  done = False
-                  for line in lines:
-                      f.write(line)
-                      if "build_one" in line and not done and "function" not in line:
-                          f.write("exit 0\n")
-                          done = True
-          
-          patch_file("scripts/setup.sh", "source scripts/reset.sh", "# source scripts/reset.sh")
-          '
-          
-          # 5.4 Environment Setup
-          chmod +x scripts/*.sh scripts/private/*.sh
+          # 5.5 Environment Setup
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           CPU_COUNT=$(nproc --all)
           
@@ -167,16 +175,16 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.5 Build Native (if not cached)
+          # 5.6 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
+          else
+            echo "Cache hit, skipping setup.sh and running patches manually..."
+            export SED="sed"
+            export THIRDPARTY_LIBRARIES="$(pwd)/app/jni/third_party"
+            ./scripts/private/patch-opus-impl.sh || true
+            ./scripts/private/patch-androidx-media-impl.sh || true
           fi
-          
-          # 5.6 Always run fast source patches
-          export SED="sed"
-          export THIRDPARTY_LIBRARIES="$(pwd)/app/jni/third_party"
-          ./scripts/private/patch-opus-impl.sh || true
-          ./scripts/private/patch-androidx-media-impl.sh || true
         env:
           ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
           ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
@@ -196,7 +204,6 @@ jobs:
       - name: Decode keystore
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Generating dummy keystore..."
             keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           else
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks

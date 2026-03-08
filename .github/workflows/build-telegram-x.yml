@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 240  # Increased timeout for native builds
+    timeout-minutes: 240
 
     steps:
       # ─── 1. Checkout repository ──────────────────────────────────────────
@@ -40,6 +40,7 @@ jobs:
         run: |
           chmod +x scripts/*.sh || true
           
+          # Dynamically determine required NDK
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
             P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
             L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
@@ -66,7 +67,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils
           # Git Optimizations
-          git config --global http.postBuffer 2097152000 # 2GB
+          git config --global http.postBuffer 4294967296 # 4GB
           git config --global core.compression 0
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
@@ -86,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v18-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v19-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v18-${{ runner.os }}-
+            native-v19-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -100,10 +101,15 @@ jobs:
           git config --global url."https://github.com/".insteadOf || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.1 diagnostics and prep
+          # 5.1 Diagnostics
+          df -h
+          free -m
+          [ -f version.properties ] && cat version.properties
+          
+          # 5.2 Prep scripts
           chmod +x scripts/*.sh scripts/private/*.sh || true
           
-          # 5.2 Patch scripts for ARM64 Latest build
+          # 5.3 Patch scripts for ARM64 Latest build
           python3 -c '
           import os, re
           
@@ -138,13 +144,13 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Full Submodule Sync with Retries (No shallow to avoid commit mismatch)
+          # 5.4 Submodule Sync with moderate parallelism
           if [ -f .gitmodules ]; then
             echo "Starting submodule sync..."
             git submodule init
             for i in {1..3}; do
               echo "Attempt $i..."
-              git submodule update --init --recursive --force --jobs 8 && break || {
+              git submodule update --init --recursive --force --jobs 4 && break || {
                 if [ $i -eq 3 ]; then echo "FAILED to sync submodules"; exit 1; fi
                 echo "Retry $i..."
                 sleep 30
@@ -152,7 +158,7 @@ jobs:
             done
           fi
 
-          # 5.4 Environment Setup
+          # 5.5 Environment Setup
           CPU_COUNT=$(nproc --all)
           
           cat > local.properties <<EOF
@@ -167,7 +173,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.5 Build Native (if not cached)
+          # 5.6 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else

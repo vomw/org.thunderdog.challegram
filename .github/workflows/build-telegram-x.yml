@@ -59,13 +59,14 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-${{ runner.os }}-${{ hashFiles('app/jni/**/*.cmake', 'app/jni/**/CMakeLists.txt', 'app/jni/CMakeLists.txt') }}
+          key: native-${{ runner.os }}-${{ hashFiles('app/jni/**/*.cmake', 'app/jni/**/CMakeLists.txt', 'app/jni/CMakeLists.txt', 'scripts/private/*.sh') }}
           restore-keys: |
             native-${{ runner.os }}-
 
       # ─── 5. Build Native Dependencies ──────────────────────────────────────
       - name: Build native dependencies (FFmpeg, libvpx, etc.)
         run: |
+          set -e
           # Use python to patch scripts for speed (only build latest arm64)
           python3 -c '
           import os
@@ -133,7 +134,12 @@ jobs:
       # ─── 7. Decode & write the signing keystore ────────────────────────────
       - name: Decode keystore
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "KEYSTORE_BASE64 secret is missing! Generating a dummy one for build testing..."
+            keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
+          fi
 
       # ─── 8. Gradle performance tweaks ──────────────────────────────────────
       - name: Configure Gradle JVM args
@@ -162,13 +168,22 @@ jobs:
       - name: Sign APK
         run: |
           APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found to sign!"
+            exit 1
+          fi
           echo "Found APK at: $APK_PATH"
+
+          # Use defaults if secrets are missing
+          KS_PASS=${{ secrets.KEYSTORE_PASSWORD || 'android' }}
+          KS_ALIAS=${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
+          KEY_PASS=${{ secrets.KEY_PASSWORD || 'android' }}
 
           $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
             --ks keystore.jks \
-            --ks-pass pass:${{ secrets.KEYSTORE_PASSWORD }} \
-            --ks-key-alias ${{ secrets.KEY_ALIAS }} \
-            --key-pass pass:${{ secrets.KEY_PASSWORD }} \
+            --ks-pass pass:"$KS_PASS" \
+            --ks-key-alias "$KS_ALIAS" \
+            --key-pass pass:"$KEY_PASS" \
             --out app-release-signed.apk \
             "$APK_PATH"
 

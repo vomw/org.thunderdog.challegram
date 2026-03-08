@@ -66,7 +66,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev
           # Git Optimizations
           git config --global http.postBuffer 1048576000
           git config --global http.maxRequests 1
@@ -89,9 +89,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v22-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v23-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v22-${{ runner.os }}-
+            native-v23-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -114,7 +114,8 @@ jobs:
           def patch_file_regex(path, pattern, replace):
               if not os.path.exists(path): return
               with open(path, "r") as f: content = f.read()
-              new_content = re.sub(pattern, replace, content)
+              # More specific replacement to target only the main build loop
+              new_content = re.sub(pattern, replace, content, count=1)
               if new_content != content:
                   with open(path, "w") as f: f.write(new_content)
                   print(f"Patched {path}")
@@ -122,8 +123,10 @@ jobs:
                   print(f"PATTERN NOT MATCHED in {path}")
 
           patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
+          
+          # Specific regex for build loops in build-vpx-impl.sh
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in arm64-v8a [^;]+ ; do", "for ABI in arm64-v8a ; do")
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in latest [^;]+ ; do", "for FLAVOR in latest ; do")
           
           ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
           if os.path.exists(ffmpeg_script):
@@ -147,10 +150,11 @@ jobs:
             echo "Syncing submodules..."
             git submodule sync --recursive
             git submodule init
-            PATHS=$(git config --file .gitmodules --get-regexp path | awk 
-'{print $2}' | tr -d '\r')
+            # Get list of paths from .gitmodules
+            PATHS=$(git config --file .gitmodules --get-regexp path | awk '{print $2}' | tr -d '\r')
             for sm in $PATHS; do
               echo "Syncing $sm..."
+              # Try shallow update with retries
               for i in {1..5}; do
                 git submodule update --init --recursive --force --depth 1 "$sm" && break || {
                   if [ $i -eq 5 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi

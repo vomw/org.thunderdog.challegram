@@ -49,6 +49,7 @@ jobs:
 
       # ─── 4. Cache native build outputs (saves ~30 min on repeat runs) ──────
       - name: Cache native libraries
+        id: native-cache
         uses: actions/cache@v4
         with:
           path: |
@@ -65,6 +66,7 @@ jobs:
 
       # ─── 5. Build Native Dependencies ──────────────────────────────────────
       - name: Build native dependencies (FFmpeg, libvpx, etc.)
+        if: steps.native-cache.outputs.cache-hit != 'true'
         run: |
           set -e
           set -x
@@ -108,6 +110,9 @@ jobs:
                           f.write("exit 0\n")
                           done = True
               print(f"Patched {ffmpeg_script} to stop after first build")
+          
+          # Disable reset.sh in setup.sh to prevent cache deletion if we ever run it
+          patch_file("scripts/setup.sh", "source scripts/reset.sh", "# source scripts/reset.sh")
           '
           
           # 5.2 Configure environment
@@ -133,7 +138,6 @@ jobs:
           fi
           
           # 5.4 Run the official setup script
-          # We use --skip-sdk-setup to avoid redundant downloads
           ./scripts/setup.sh --skip-sdk-setup || {
             echo "Setup script failed. Retrying without --skip-sdk-setup..."
             ./scripts/setup.sh
@@ -142,13 +146,27 @@ jobs:
           ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
           ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
 
-      # ─── 6. Verify native build results ────────────────────────────────────
+      # ─── 6. Prepare artifacts even on cache hit ────────────────────────────
+      - name: Patch and prepare source files
+        run: |
+          # These steps are fast and needed even if build artifacts are cached
+          # (e.g. patch-androidx-media-impl.sh generates .cc files in JNI folder)
+          chmod +x scripts/*.sh scripts/private/*.sh
+          export SED="sed"
+          export THIRDPARTY_LIBRARIES="$(pwd)/app/jni/third_party"
+          ./scripts/private/patch-opus-impl.sh || true
+          ./scripts/private/patch-androidx-media-impl.sh || true
+        env:
+          ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
+          ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
+
+      # ─── 7. Verify native build results ────────────────────────────────────
       - name: Verify native artifacts
         run: |
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
           ls -R app/jni/third_party/libvpx/build/latest/arm64-v8a/include || echo "libvpx headers NOT FOUND"
 
-      # ─── 7. Write final local.properties ───────────────────────────────────
+      # ─── 8. Write final local.properties ───────────────────────────────────
       - name: Final Configure local.properties
         run: |
           cat > local.properties <<EOF
@@ -157,7 +175,7 @@ jobs:
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
           EOF
 
-      # ─── 8. Decode & write the signing keystore ────────────────────────────
+      # ─── 9. Decode & write the signing keystore ────────────────────────────
       - name: Decode keystore
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
@@ -167,7 +185,7 @@ jobs:
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
           fi
 
-      # ─── 9. Gradle performance tweaks ──────────────────────────────────────
+      # ─── 10. Gradle performance tweaks ──────────────────────────────────────
       - name: Configure Gradle JVM args
         run: |
           mkdir -p ~/.gradle
@@ -178,17 +196,19 @@ jobs:
           android.useAndroidX=true
           EOF
 
-      # ─── 10. Build the release APK ─────────────────────────────────────────
+      # ─── 11. Grant execute permission ───────────────────────────────────────
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # ─── 12. Build the release APK ─────────────────────────────────────────
       - name: Build release APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleLatestArm64Release --stacktrace
+        run: ./gradlew assembleLatestArm64Release --stacktrace
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/23.2.8568313
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
 
-      # ─── 11. Sign the APK with apksigner ───────────────────────────────────
+      # ─── 13. Sign the APK with apksigner ───────────────────────────────────
       - name: Sign APK
         run: |
           APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
@@ -210,13 +230,13 @@ jobs:
             --out app-release-signed.apk \
             "$APK_PATH"
 
-      # ─── 12. Verify the signature ──────────────────────────────────────────
+      # ─── 14. Verify the signature ──────────────────────────────────────────
       - name: Verify APK signature
         run: |
           $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify \
             --verbose app-release-signed.apk
 
-      # ─── 13. Upload APK as artifact ────────────────────────────────────────
+      # ─── 15. Upload APK as artifact ────────────────────────────────────────
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
@@ -224,7 +244,7 @@ jobs:
           path: app-release-signed.apk
           retention-days: 30
 
-      # ─── 14. (Optional) Create a GitHub Release ────────────────────────────
+      # ─── 16. (Optional) Create a GitHub Release ────────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

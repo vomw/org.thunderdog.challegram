@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 240  # Increased timeout for native builds
 
     steps:
       # ─── 1. Checkout repository ──────────────────────────────────────────
@@ -64,7 +64,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils
           # Git Optimizations
           git config --global http.postBuffer 2097152000 # 2GB
           git config --global core.compression 0
@@ -86,9 +86,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v17-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v18-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v17-${{ runner.os }}-
+            native-v18-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -138,16 +138,16 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Parallel Submodule Sync with Retries
+          # 5.3 Full Submodule Sync with Retries (No shallow to avoid commit mismatch)
           if [ -f .gitmodules ]; then
-            echo "Starting parallel submodule sync..."
+            echo "Starting submodule sync..."
             git submodule init
             for i in {1..3}; do
               echo "Attempt $i..."
-              git submodule update --init --recursive --force --depth 1 --jobs 8 && break || {
+              git submodule update --init --recursive --force --jobs 8 && break || {
                 if [ $i -eq 3 ]; then echo "FAILED to sync submodules"; exit 1; fi
                 echo "Retry $i..."
-                sleep 20
+                sleep 30
               }
             done
           fi

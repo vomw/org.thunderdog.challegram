@@ -21,6 +21,7 @@ jobs:
           repository: TGX-Android/Telegram-X
           fetch-depth: 0
           submodules: false
+          lfs: true
 
       # ─── 2. Java 21 ────────────────────────────────────────────────────────
       - name: Set up JDK 21
@@ -39,6 +40,8 @@ jobs:
           chmod +x scripts/*.sh || true
           
           # Dynamically determine required NDK from version.properties
+          P_NDK=""
+          L_NDK=""
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
             P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
             L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
@@ -80,9 +83,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v8-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v9-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v8-${{ runner.os }}-
+            native-v9-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -130,7 +133,7 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Surgical Submodule Sync (with fallback)
+          # 5.3 Surgical Submodule Sync (with deep cleanup)
           if [ -f .gitmodules ]; then
             echo "Starting surgical submodule sync..."
             SUBMODULES=(
@@ -168,10 +171,11 @@ jobs:
             for sm in "${SUBMODULES[@]}"; do
               if git config --file .gitmodules --get-regexp "path" | grep -q "$sm"; then
                 echo "Syncing $sm..."
-                # Try shallow first, then full if it fails
+                # Tiered sync: shallow -> full -> fresh clone
                 git submodule update --init --recursive --force --depth 1 "$sm" || \
                 git submodule update --init --recursive --force "$sm" || {
-                  echo "Retry 3 for $sm (Full wipe)..."
+                  echo "Retry 3 for $sm (Purging directory)..."
+                  git submodule deinit -f "$sm" || true
                   rm -rf "$sm"
                   git submodule update --init --recursive --force "$sm"
                 }

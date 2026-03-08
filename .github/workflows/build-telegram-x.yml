@@ -42,6 +42,11 @@ jobs:
             "build-tools;36.0.0" \
             "platforms;android-36"
 
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yasm
+
       # ─── 4. Cache native build outputs (saves ~30 min on repeat runs) ──────
       - name: Cache native libraries
         uses: actions/cache@v4
@@ -52,11 +57,71 @@ jobs:
             app/.cxx
             app/jni/build
             app/src/main/libs
+            app/jni/third_party/ffmpeg/build
+            app/jni/third_party/libvpx/build
           key: native-${{ runner.os }}-${{ hashFiles('app/jni/**/*.cmake', 'app/jni/**/CMakeLists.txt', 'app/jni/CMakeLists.txt') }}
           restore-keys: |
             native-${{ runner.os }}-
 
-      # ─── 5. Write local.properties ─────────────────────────────────────────
+      # ─── 5. Build Native Dependencies ──────────────────────────────────────
+      - name: Build native dependencies (FFmpeg, libvpx, etc.)
+        run: |
+          # Use python to patch scripts for speed (only build latest arm64)
+          python3 -c '
+          import os
+          
+          def patch_file(path, search, replace):
+              if not os.path.exists(path): return
+              with open(path, "r") as f: content = f.read()
+              if search in content:
+                  with open(path, "w") as f: f.write(content.replace(search, replace))
+                  print(f"Patched {path}")
+
+          # Fix set-env.sh typo
+          patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
+          
+          # Only build arm64-v8a latest for vpx
+          patch_file("scripts/private/build-vpx-impl.sh", 
+                     "for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do", 
+                     "for ABI in arm64-v8a ; do")
+          patch_file("scripts/private/build-vpx-impl.sh", 
+                     "for FLAVOR in latest lollipop legacy ; do", 
+                     "for FLAVOR in latest ; do")
+          
+          # Only build arm64 latest for ffmpeg
+          if os.path.exists("scripts/private/build-ffmpeg-impl.sh"):
+              with open("scripts/private/build-ffmpeg-impl.sh", "r") as f: lines = f.readlines()
+              with open("scripts/private/build-ffmpeg-impl.sh", "w") as f:
+                  done = False
+                  for line in lines:
+                      f.write(line)
+                      if "build_one" in line and not done and "function" not in line:
+                          f.write("exit 0\n")
+                          done = True
+              print("Patched scripts/private/build-ffmpeg-impl.sh to stop after first build")
+          '
+          
+          chmod +x scripts/*.sh scripts/private/*.sh
+          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          
+          # Create local.properties to satisfy setup.sh and avoid prompts
+          cat > local.properties <<EOF
+          sdk.dir=$ANDROID_HOME
+          telegram.api_id=${{ secrets.TELEGRAM_API_ID || '12345' }}
+          telegram.api_hash=${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}
+          app.id=org.thunderdog.challegram
+          app.name=Telegram X
+          app.download_url=https://github.com/${{ github.repository }}
+          app.sources_url=https://github.com/${{ github.repository }}
+          keystore.file=$(pwd)/keystore.jks
+          EOF
+          
+          ./scripts/setup.sh --skip-sdk-setup
+        env:
+          ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
+          ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
+
+      # ─── 6. Write local.properties ─────────────────────────────────────────
       - name: Configure local.properties
         run: |
           cat > local.properties <<EOF
@@ -65,12 +130,12 @@ jobs:
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
           EOF
 
-      # ─── 6. Decode & write the signing keystore ────────────────────────────
+      # ─── 7. Decode & write the signing keystore ────────────────────────────
       - name: Decode keystore
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
 
-      # ─── 7. Gradle performance tweaks ──────────────────────────────────────
+      # ─── 8. Gradle performance tweaks ──────────────────────────────────────
       - name: Configure Gradle JVM args
         run: |
           mkdir -p ~/.gradle
@@ -81,15 +146,9 @@ jobs:
           android.useAndroidX=true
           EOF
 
-      # ─── 8. Grant execute permission ───────────────────────────────────────
+      # ─── 9. Grant execute permission ───────────────────────────────────────
       - name: Make gradlew executable
         run: chmod +x ./gradlew
-
-      # ─── 9. Prepare / compile native dependencies ────────────────────────── 
-      - name: Prepare native dependencies
-        run: ./gradlew prepareLatestArm64ReleaseDependencies --stacktrace || ./gradlew prepareReleaseDependencies --stacktrace || echo "Preparation task failed, continuing..."
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/23.2.8568313
 
       # ─── 10. Build the release APK ─────────────────────────────────────────
       - name: Build release APK

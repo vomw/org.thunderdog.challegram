@@ -40,12 +40,12 @@ jobs:
           
           # Dynamically determine required NDK from version.properties
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
-            PRIMARY_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || echo "23.2.8568313")
-            LEGACY_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || echo "23.2.8568313")
-          else
-            PRIMARY_NDK="23.2.8568313"
-            LEGACY_NDK="23.2.8568313"
+            P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
+            L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
           fi
+          
+          PRIMARY_NDK=${P_NDK:-"23.2.8568313"}
+          LEGACY_NDK=${L_NDK:-"23.2.8568313"}
           
           echo "Installing NDK versions: $PRIMARY_NDK, $LEGACY_NDK"
           yes | sdkmanager --install \
@@ -54,13 +54,14 @@ jobs:
             "cmake;3.22.1" \
             "build-tools;36.0.0" \
             "platforms;android-36" \
-            "platforms;android-35"
+            "platforms;android-35" \
+            "platforms;android-34"
 
       - name: Install System Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson
-          # Git Optimizations for large submodules
+          # Git Optimizations
           git config --global http.postBuffer 1048576000 # 1GB
           git config --global core.compression 0
           git config --global http.lowSpeedLimit 0
@@ -79,9 +80,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v7-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v8-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v7-${{ runner.os }}-
+            native-v8-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -129,7 +130,7 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Surgical Submodule Sync (Improved reliability)
+          # 5.3 Surgical Submodule Sync (with fallback)
           if [ -f .gitmodules ]; then
             echo "Starting surgical submodule sync..."
             SUBMODULES=(
@@ -170,7 +171,7 @@ jobs:
                 # Try shallow first, then full if it fails
                 git submodule update --init --recursive --force --depth 1 "$sm" || \
                 git submodule update --init --recursive --force "$sm" || {
-                  echo "Retry 3 for $sm..."
+                  echo "Retry 3 for $sm (Full wipe)..."
                   rm -rf "$sm"
                   git submodule update --init --recursive --force "$sm"
                 }

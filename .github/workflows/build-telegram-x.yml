@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 180
 
     steps:
       # ─── 1. Checkout repository ──────────────────────────────────────────
@@ -40,7 +40,6 @@ jobs:
         run: |
           chmod +x scripts/*.sh || true
           
-          # Dynamically determine required NDK
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
             P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
             L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
@@ -65,9 +64,10 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils
-          # Git Optimizations
-          git config --global http.postBuffer 4294967296 # 4GB
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev
+          # Git Optimizations (Reduced buffer to 1GB for RAM stability)
+          git config --global http.postBuffer 1048576000
+          git config --global http.maxRequests 1
           git config --global core.compression 0
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
@@ -87,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v19-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v20-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v19-${{ runner.os }}-
+            native-v20-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -144,17 +144,21 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.4 Submodule Sync with moderate parallelism
+          # 5.4 Dynamic Submodule Sync (with tr -d \r for CRLF safety)
           if [ -f .gitmodules ]; then
-            echo "Starting submodule sync..."
+            echo "Starting dynamic submodule sync..."
             git submodule init
-            for i in {1..3}; do
-              echo "Attempt $i..."
-              git submodule update --init --recursive --force --jobs 4 && break || {
-                if [ $i -eq 3 ]; then echo "FAILED to sync submodules"; exit 1; fi
-                echo "Retry $i..."
-                sleep 30
-              }
+            PATHS=$(git config --file .gitmodules --get-regexp path | awk '{print $2}' | tr -d '\r')
+            for sm in $PATHS; do
+              echo "Syncing $sm..."
+              for i in {1..3}; do
+                git submodule update --init --recursive --force --depth 1 "$sm" && break || {
+                  if [ $i -eq 3 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi
+                  git submodule deinit -f "$sm" || true
+                  rm -rf "$sm"
+                  sleep 20
+                }
+              done
             done
           fi
 
@@ -189,7 +193,7 @@ jobs:
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
           git submodule status
           cat > local.properties <<EOF
-          sdk.dir=$ANDROID_SDK_ROOT
+          sdk.dir=${ANDROID_SDK_ROOT}
           org.gradle.workers.max=$(nproc --all)
           telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}

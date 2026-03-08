@@ -39,10 +39,12 @@ jobs:
       - name: Install NDK and Build Tools
         run: |
           chmod +x scripts/*.sh || true
+          export PATH=$PATH:$(pwd)/scripts
           
+          # Dynamically determine required NDK from version.properties
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
-            P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
-            L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
+            P_NDK=$(read-property.sh version.properties version.ndk_primary || true)
+            L_NDK=$(read-property.sh version.properties version.ndk_legacy || true)
           fi
           
           PRIMARY_NDK=${P_NDK:-"23.2.8568313"}
@@ -64,7 +66,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev
           # Git Optimizations
           git config --global http.postBuffer 1048576000
           git config --global http.maxRequests 1
@@ -87,9 +89,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v21-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v22-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v21-${{ runner.os }}-
+            native-v22-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -142,12 +144,14 @@ jobs:
 
           # 5.3 Dynamic Submodule Sync
           if [ -f .gitmodules ]; then
-            echo "Starting dynamic submodule sync..."
+            echo "Syncing submodules..."
+            git submodule sync --recursive
             git submodule init
-            PATHS=$(git config --file .gitmodules --get-regexp path | awk '{print $2}' | tr -d '\r')
+            PATHS=$(git config --file .gitmodules --get-regexp path | awk 
+'{print $2}' | tr -d '\r')
             for sm in $PATHS; do
               echo "Syncing $sm..."
-              for i in {1..5}; do # 5 retries
+              for i in {1..5}; do
                 git submodule update --init --recursive --force --depth 1 "$sm" && break || {
                   if [ $i -eq 5 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi
                   git submodule deinit -f "$sm" || true

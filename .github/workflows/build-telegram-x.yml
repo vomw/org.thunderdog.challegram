@@ -60,6 +60,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson
+          # Git Optimizations for large submodules
+          git config --global http.postBuffer 1048576000 # 1GB
+          git config --global core.compression 0
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
 
       # ─── 4. Cache native build outputs ─────────────────────────────────────
       - name: Cache native libraries
@@ -84,17 +89,12 @@ jobs:
           set -e
           set -x
           
-          # 5.1 Git Optimizations
-          git config --global http.postBuffer 1048576000 # 1GB buffer
-          git config --global core.compression 0
-          git config --global http.lowSpeedLimit 0
-          git config --global http.lowSpeedTime 999999
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.2 Make all scripts executable
+          # 5.1 Make all scripts executable
           chmod +x scripts/*.sh scripts/private/*.sh || true
           
-          # 5.3 Patch scripts
+          # 5.2 Patch scripts for ARM64 Latest build
           python3 -c '
           import os
           
@@ -108,7 +108,7 @@ jobs:
           # Fix set-env.sh typo
           patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
           
-          # Force ARM64 Latest build for speed
+          # Force ARM64 Latest build
           patch_file("scripts/private/build-vpx-impl.sh", "for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do", "for ABI in arm64-v8a ; do")
           patch_file("scripts/private/build-vpx-impl.sh", "for FLAVOR in latest lollipop legacy ; do", "for FLAVOR in latest ; do")
           
@@ -129,7 +129,7 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.4 Surgical Submodule Sync (with existence check)
+          # 5.3 Surgical Submodule Sync (Improved reliability)
           if [ -f .gitmodules ]; then
             echo "Starting surgical submodule sync..."
             SUBMODULES=(
@@ -164,21 +164,21 @@ jobs:
             )
             
             git submodule init
-            for sm in "${{ SUBMODULES[@] }}"; do
+            for sm in "${SUBMODULES[@]}"; do
               if git config --file .gitmodules --get-regexp "path" | grep -q "$sm"; then
                 echo "Syncing $sm..."
-                for i in {1..3}; do
-                  git submodule update --init --recursive --force --depth 1 "$sm" && break || {
-                    if [ $i -eq 3 ]; then echo "Submodule $sm failed!"; exit 1; fi
-                    rm -rf "$sm"
-                    sleep 15
-                  }
-                done
+                # Try shallow first, then full if it fails
+                git submodule update --init --recursive --force --depth 1 "$sm" || \
+                git submodule update --init --recursive --force "$sm" || {
+                  echo "Retry 3 for $sm..."
+                  rm -rf "$sm"
+                  git submodule update --init --recursive --force "$sm"
+                }
               fi
             done
           fi
 
-          # 5.5 Environment Setup
+          # 5.4 Environment Setup
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           CPU_COUNT=$(nproc --all)
           
@@ -194,7 +194,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.6 Build Native (if not cached)
+          # 5.5 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else

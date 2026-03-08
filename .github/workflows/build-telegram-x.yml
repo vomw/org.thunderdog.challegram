@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # increased timeout
+    timeout-minutes: 180
 
     steps:
       # ─── 1. Checkout repository ──────────────────────────────────────────
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
-          fetch-depth: 1
+          fetch-depth: 0 # full history for submodule stability
           submodules: false
 
       # ─── 2. Java 21 ────────────────────────────────────────────────────────
@@ -60,20 +60,23 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v2-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v3-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v2-${{ runner.os }}-
+            native-v3-${{ runner.os }}-
 
       # ─── 5. Handle Submodules Surgical Sync ────────────────────────────────
-      - name: Sync submodules (Surgical)
+      - name: Sync submodules
         run: |
           set -e
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # Initialize submodules but don't clone yet
+          echo "Disk space before sync:"
+          df -h
+          
+          # Initialize submodules
           git submodule init
           
-          # List of essential submodules for native and core build
+          # curating list of submodules to avoid huge overhead
           SUBMODULES=(
             "app/jni/third_party/ffmpeg"
             "app/jni/third_party/libvpx"
@@ -106,14 +109,18 @@ jobs:
           )
           
           for sm in "${SUBMODULES[@]}"; do
-            echo "Syncing submodule: $sm"
+            echo "Syncing: $sm"
             for i in {1..3}; do
-              git submodule update --init --depth 1 --recursive "$sm" && break || {
-                echo "Retry $i for $sm..."
-                sleep 10
+              git submodule update --init --recursive --depth 1 "$sm" && break || {
+                echo "Failed to sync $sm, attempt $i. Cleaning and retrying..."
+                rm -rf "$sm"
+                git submodule update --init --recursive --force --depth 1 "$sm" && break || sleep 10
               }
             done
           done
+          
+          echo "Disk space after sync:"
+          df -h
 
       # ─── 6. Build Native Dependencies ──────────────────────────────────────
       - name: Build native dependencies
@@ -153,10 +160,12 @@ jobs:
           # 6.2 Configure environment
           chmod +x scripts/*.sh scripts/private/*.sh
           export ANDROID_SDK_ROOT=$ANDROID_HOME
+          CPU_COUNT=$(nproc --all)
           
           # Create local.properties early
           cat > local.properties <<EOF
           sdk.dir=$ANDROID_HOME
+          org.gradle.workers.max=$CPU_COUNT
           telegram.api_id=${{ secrets.TELEGRAM_API_ID || '12345' }}
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}
           app.id=org.thunderdog.challegram
@@ -195,6 +204,7 @@ jobs:
         run: |
           cat > local.properties <<EOF
           sdk.dir=${ANDROID_SDK_ROOT}
+          org.gradle.workers.max=$(nproc --all)
           telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
           EOF

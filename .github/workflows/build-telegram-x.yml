@@ -39,12 +39,7 @@ jobs:
         run: |
           chmod +x scripts/*.sh || true
           
-          # Print version.properties for diagnostics
-          cat version.properties || echo "version.properties NOT FOUND"
-          
           # Dynamically determine required NDK from version.properties
-          P_NDK=""
-          L_NDK=""
           if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
             P_NDK=$(./scripts/read-property.sh version.properties version.ndk_primary || true)
             L_NDK=$(./scripts/read-property.sh version.properties version.ndk_legacy || true)
@@ -66,7 +61,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev
           # Git Optimizations
           git config --global http.postBuffer 1048576000 # 1GB
           git config --global core.compression 0
@@ -86,9 +81,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v10-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v11-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v10-${{ runner.os }}-
+            native-v11-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -98,15 +93,21 @@ jobs:
           
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.1 Make all scripts executable
+          # 5.1 Diagnostics
+          cat version.properties || echo "version.properties NOT FOUND"
+          ls -la scripts/ || echo "scripts/ NOT FOUND"
+          
+          # 5.2 Make all scripts executable
           chmod +x scripts/*.sh scripts/private/*.sh || true
           
-          # 5.2 Patch scripts for ARM64 Latest build
+          # 5.3 Patch scripts for ARM64 Latest build
           python3 -c '
           import os, re
           
           def patch_file_regex(path, pattern, replace):
-              if not os.path.exists(path): return
+              if not os.path.exists(path): 
+                  print(f"FILE NOT FOUND: {path}")
+                  return
               with open(path, "r") as f: content = f.read()
               new_content = re.sub(pattern, replace, content)
               if new_content != content:
@@ -119,8 +120,9 @@ jobs:
           patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
           
           # Force ARM64 Latest build for speed
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in .+ ; do", "for ABI in arm64-v8a ; do")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in .+ ; do", "for FLAVOR in latest ; do")
+          # More precise regex to match "for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do"
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in arm64-v8a armeabi-v7a x86_64 x86 ; do", "for ABI in arm64-v8a ; do")
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in latest lollipop legacy ; do", "for FLAVOR in latest ; do")
           
           ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
           if os.path.exists(ffmpeg_script):
@@ -132,14 +134,13 @@ jobs:
                       if "build_one" in line and not done and "function" not in line:
                           f.write("exit 0\n")
                           done = True
-          '
           
           # Disable reset.sh to protect cache
           echo "#!/bin/bash" > scripts/reset.sh
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Surgical Submodule Sync (with deep cleanup)
+          # 5.4 Surgical Submodule Sync (with deep cleanup)
           if [ -f .gitmodules ]; then
             echo "Starting surgical submodule sync..."
             SUBMODULES=(
@@ -174,8 +175,8 @@ jobs:
             )
             
             git submodule init
-            for sm in "${SUBMODULES[@]}"; do
-              if git config --file .gitmodules --get-regexp "path" | grep -q "$sm"; then
+            for sm in "${{ SUBMODULES[@] }}"; do
+              if git config --file .gitmodules --get-regexp "path" | grep -q "${sm}$\"; then
                 echo "Syncing $sm..."
                 # Tiered sync: shallow -> full -> fresh clone
                 git submodule update --init --recursive --force --depth 1 "$sm" || \
@@ -189,7 +190,7 @@ jobs:
             done
           fi
 
-          # 5.4 Environment Setup
+          # 5.5 Environment Setup
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           CPU_COUNT=$(nproc --all)
           
@@ -205,7 +206,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.5 Build Native (if not cached)
+          # 5.6 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else
@@ -223,6 +224,7 @@ jobs:
       - name: Verify results and Final Config
         run: |
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
+          git submodule status
           cat > local.properties <<EOF
           sdk.dir=${ANDROID_SDK_ROOT}
           org.gradle.workers.max=$(nproc --all)

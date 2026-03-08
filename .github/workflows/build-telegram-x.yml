@@ -11,16 +11,16 @@ jobs:
   build:
     name: Build Signed APK
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # Native compilation takes a long time
+    timeout-minutes: 150  # Native compilation takes a long time
 
     steps:
-      # ─── 1. Checkout with ALL submodules ─────────────────────────────────
-      - name: Checkout repository (with submodules)
+      # ─── 1. Checkout repository ──────────────────────────────────────────
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
-          submodules: recursive
           fetch-depth: 0
+          submodules: false # We will handle submodules manually for better reliability
 
       # ─── 2. Java 21 ────────────────────────────────────────────────────────
       - name: Set up JDK 21
@@ -34,7 +34,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK and CMake
+      - name: Install NDK and Build Tools
         run: |
           yes | sdkmanager --install \
             "ndk;23.2.8568313" \
@@ -45,9 +45,9 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson
 
-      # ─── 4. Cache native build outputs (saves ~30 min on repeat runs) ──────
+      # ─── 4. Cache native build outputs ─────────────────────────────────────
       - name: Cache native libraries
         id: native-cache
         uses: actions/cache@v4
@@ -60,18 +60,29 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-${{ runner.os }}-${{ hashFiles('app/jni/**/*.cmake', 'app/jni/**/CMakeLists.txt', 'app/jni/CMakeLists.txt', 'scripts/private/*.sh', 'version.properties') }}
+          key: native-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
             native-${{ runner.os }}-
 
-      # ─── 5. Build Native Dependencies ──────────────────────────────────────
-      - name: Build native dependencies (FFmpeg, libvpx, etc.)
+      # ─── 5. Handle Submodules Manually ─────────────────────────────────────
+      - name: Sync submodules
+        run: |
+          set -e
+          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
+          
+          # Attempt recursive update with retries
+          for i in {1..3}; do
+            echo "Submodule update attempt $i..."
+            git submodule update --init --recursive --depth 1 && break || sleep 15
+          done
+
+      # ─── 6. Build Native Dependencies ──────────────────────────────────────
+      - name: Build native dependencies
         if: steps.native-cache.outputs.cache-hit != 'true'
         run: |
           set -e
-          set -x
           
-          # 5.1 Patch scripts for speed & CI compatibility
+          # 6.1 Patch scripts for speed & CI compatibility
           python3 -c '
           import os
           
@@ -84,7 +95,7 @@ jobs:
                   with open(path, "w") as f: f.write(content.replace(search, replace))
                   print(f"Patched {path}")
               else:
-                  print(f"SEARCH NOT FOUND in {path}: {search[:50]}...")
+                  print(f"SEARCH NOT FOUND in {path}")
 
           # Fix set-env.sh typo
           patch_file("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
@@ -105,17 +116,16 @@ jobs:
                   done = False
                   for line in lines:
                       f.write(line)
-                      # Insert exit 0 after the first build_one call (which is latest-arm64)
                       if "build_one" in line and not done and "function" not in line:
                           f.write("exit 0\n")
                           done = True
               print(f"Patched {ffmpeg_script} to stop after first build")
           
-          # Disable reset.sh in setup.sh to prevent cache deletion if we ever run it
+          # Disable reset.sh in setup.sh to prevent cache deletion
           patch_file("scripts/setup.sh", "source scripts/reset.sh", "# source scripts/reset.sh")
           '
           
-          # 5.2 Configure environment
+          # 6.2 Configure environment
           chmod +x scripts/*.sh scripts/private/*.sh
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           
@@ -131,26 +141,15 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.3 Verify submodules are present
-          if [ ! -d "app/jni/third_party/ffmpeg" ] || [ -z "$(ls -A app/jni/third_party/ffmpeg)" ]; then
-            echo "FFmpeg submodule is missing or empty! Attempting manual sync..."
-            git submodule update --init --recursive --depth 1 app/jni/third_party/ffmpeg
-          fi
-          
-          # 5.4 Run the official setup script
-          ./scripts/setup.sh --skip-sdk-setup || {
-            echo "Setup script failed. Retrying without --skip-sdk-setup..."
-            ./scripts/setup.sh
-          }
+          # 6.3 Run the official setup script
+          ./scripts/setup.sh --skip-sdk-setup
         env:
           ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
           ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
 
-      # ─── 6. Prepare artifacts even on cache hit ────────────────────────────
-      - name: Patch and prepare source files
+      # ─── 7. Mandatory patches (Fast) ───────────────────────────────────────
+      - name: Apply mandatory source patches
         run: |
-          # These steps are fast and needed even if build artifacts are cached
-          # (e.g. patch-androidx-media-impl.sh generates .cc files in JNI folder)
           chmod +x scripts/*.sh scripts/private/*.sh
           export SED="sed"
           export THIRDPARTY_LIBRARIES="$(pwd)/app/jni/third_party"
@@ -160,13 +159,13 @@ jobs:
           ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
           ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
 
-      # ─── 7. Verify native build results ────────────────────────────────────
+      # ─── 8. Verify native build results ────────────────────────────────────
       - name: Verify native artifacts
         run: |
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
           ls -R app/jni/third_party/libvpx/build/latest/arm64-v8a/include || echo "libvpx headers NOT FOUND"
 
-      # ─── 8. Write final local.properties ───────────────────────────────────
+      # ─── 9. Final Configure local.properties ───────────────────────────────
       - name: Final Configure local.properties
         run: |
           cat > local.properties <<EOF
@@ -175,40 +174,27 @@ jobs:
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
           EOF
 
-      # ─── 9. Decode & write the signing keystore ────────────────────────────
+      # ─── 10. Decode & write the signing keystore ───────────────────────────
       - name: Decode keystore
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "KEYSTORE_BASE64 secret is missing! Generating a dummy one..."
+            echo "KEYSTORE_BASE64 secret is missing! Generating dummy..."
             keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           else
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
           fi
 
-      # ─── 10. Gradle performance tweaks ──────────────────────────────────────
-      - name: Configure Gradle JVM args
-        run: |
-          mkdir -p ~/.gradle
-          cat >> ~/.gradle/gradle.properties <<EOF
-          org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
-          org.gradle.parallel=true
-          org.gradle.caching=true
-          android.useAndroidX=true
-          EOF
-
-      # ─── 11. Grant execute permission ───────────────────────────────────────
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
-      # ─── 12. Build the release APK ─────────────────────────────────────────
+      # ─── 11. Gradle build ──────────────────────────────────────────────────
       - name: Build release APK
-        run: ./gradlew assembleLatestArm64Release --stacktrace
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleLatestArm64Release --stacktrace
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/23.2.8568313
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
 
-      # ─── 13. Sign the APK with apksigner ───────────────────────────────────
+      # ─── 12. Sign the APK ──────────────────────────────────────────────────
       - name: Sign APK
         run: |
           APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
@@ -230,26 +216,14 @@ jobs:
             --out app-release-signed.apk \
             "$APK_PATH"
 
-      # ─── 14. Verify the signature ──────────────────────────────────────────
+      # ─── 13. Verify & Upload ───────────────────────────────────────────────
       - name: Verify APK signature
         run: |
-          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify \
-            --verbose app-release-signed.apk
+          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify --verbose app-release-signed.apk
 
-      # ─── 15. Upload APK as artifact ────────────────────────────────────────
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
           name: telegram-x-signed-${{ github.run_number }}
           path: app-release-signed.apk
           retention-days: 30
-
-      # ─── 16. (Optional) Create a GitHub Release ────────────────────────────
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: app-release-signed.apk
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

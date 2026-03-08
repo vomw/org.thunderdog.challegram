@@ -64,8 +64,8 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev
-          # Git Optimizations (Reduced buffer to 1GB for RAM stability)
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev
+          # Git Optimizations
           git config --global http.postBuffer 1048576000
           git config --global http.maxRequests 1
           git config --global core.compression 0
@@ -87,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v20-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v21-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v20-${{ runner.os }}-
+            native-v21-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -101,15 +101,11 @@ jobs:
           git config --global url."https://github.com/".insteadOf || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.1 Diagnostics
-          df -h
-          free -m
-          [ -f version.properties ] && cat version.properties
-          
-          # 5.2 Prep scripts
+          # 5.1 Make scripts available
           chmod +x scripts/*.sh scripts/private/*.sh || true
+          export PATH=$PATH:$(pwd)/scripts
           
-          # 5.3 Patch scripts for ARM64 Latest build
+          # 5.2 Patch scripts for ARM64 Latest build
           python3 -c '
           import os, re
           
@@ -144,16 +140,16 @@ jobs:
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.4 Dynamic Submodule Sync (with tr -d \r for CRLF safety)
+          # 5.3 Dynamic Submodule Sync
           if [ -f .gitmodules ]; then
             echo "Starting dynamic submodule sync..."
             git submodule init
             PATHS=$(git config --file .gitmodules --get-regexp path | awk '{print $2}' | tr -d '\r')
             for sm in $PATHS; do
               echo "Syncing $sm..."
-              for i in {1..3}; do
+              for i in {1..5}; do # 5 retries
                 git submodule update --init --recursive --force --depth 1 "$sm" && break || {
-                  if [ $i -eq 3 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi
+                  if [ $i -eq 5 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi
                   git submodule deinit -f "$sm" || true
                   rm -rf "$sm"
                   sleep 20
@@ -162,7 +158,7 @@ jobs:
             done
           fi
 
-          # 5.5 Environment Setup
+          # 5.4 Environment Setup
           CPU_COUNT=$(nproc --all)
           
           cat > local.properties <<EOF
@@ -177,7 +173,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.6 Build Native (if not cached)
+          # 5.5 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else

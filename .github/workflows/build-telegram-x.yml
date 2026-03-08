@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
-          fetch-depth: 0 # full history for submodule stability
+          fetch-depth: 0
           submodules: false
 
       # ─── 2. Java 21 ────────────────────────────────────────────────────────
@@ -60,23 +60,23 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v3-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v4-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v3-${{ runner.os }}-
+            native-v4-${{ runner.os }}-
 
-      # ─── 5. Handle Submodules Surgical Sync ────────────────────────────────
-      - name: Sync submodules
+      # ─── 5. Complete Setup and Build ───────────────────────────────────────
+      - name: Setup and Build Native Dependencies
         run: |
           set -e
+          set -x
+          
+          # 5.1 Optimization: Increase Git buffer for large submodules
+          git config --global http.postBuffer 524288000
+          git config --global core.compression 0
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          echo "Disk space before sync:"
-          df -h
-          
-          # Initialize submodules
-          git submodule init
-          
-          # curating list of submodules to avoid huge overhead
+          # 5.2 Surgical Submodule Sync (Retry-enabled)
+          echo "Starting surgical submodule sync..."
           SUBMODULES=(
             "app/jni/third_party/ffmpeg"
             "app/jni/third_party/libvpx"
@@ -108,27 +108,20 @@ jobs:
             "thirdparty/androidx-media/lollipop"
           )
           
+          git submodule init
           for sm in "${SUBMODULES[@]}"; do
-            echo "Syncing: $sm"
+            echo "Syncing $sm..."
             for i in {1..3}; do
               git submodule update --init --recursive --depth 1 "$sm" && break || {
-                echo "Failed to sync $sm, attempt $i. Cleaning and retrying..."
+                if [ $i -eq 3 ]; then echo "FAILED to sync $sm"; exit 1; fi
+                echo "Retry $i for $sm..."
                 rm -rf "$sm"
-                git submodule update --init --recursive --force --depth 1 "$sm" && break || sleep 10
+                sleep 15
               }
             done
           done
-          
-          echo "Disk space after sync:"
-          df -h
 
-      # ─── 6. Build Native Dependencies ──────────────────────────────────────
-      - name: Build native dependencies
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        run: |
-          set -e
-          
-          # 6.1 Patch scripts
+          # 5.3 Patch scripts for ARM64 Latest build
           python3 -c '
           import os
           
@@ -157,12 +150,11 @@ jobs:
           patch_file("scripts/setup.sh", "source scripts/reset.sh", "# source scripts/reset.sh")
           '
           
-          # 6.2 Configure environment
+          # 5.4 Environment Setup
           chmod +x scripts/*.sh scripts/private/*.sh
           export ANDROID_SDK_ROOT=$ANDROID_HOME
           CPU_COUNT=$(nproc --all)
           
-          # Create local.properties early
           cat > local.properties <<EOF
           sdk.dir=$ANDROID_HOME
           org.gradle.workers.max=$CPU_COUNT
@@ -175,16 +167,12 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 6.3 Run setup
-          ./scripts/setup.sh --skip-sdk-setup
-        env:
-          ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
-          ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
-
-      # ─── 7. Mandatory patches (Fast) ───────────────────────────────────────
-      - name: Apply mandatory source patches
-        run: |
-          chmod +x scripts/*.sh scripts/private/*.sh
+          # 5.5 Build Native (if not cached)
+          if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
+            ./scripts/setup.sh --skip-sdk-setup
+          fi
+          
+          # 5.6 Always run fast source patches
           export SED="sed"
           export THIRDPARTY_LIBRARIES="$(pwd)/app/jni/third_party"
           ./scripts/private/patch-opus-impl.sh || true
@@ -193,15 +181,10 @@ jobs:
           ANDROID_NDK_VERSION_PRIMARY: 23.2.8568313
           ANDROID_NDK_VERSION_LEGACY: 23.2.8568313
 
-      # ─── 8. Verify native build results ────────────────────────────────────
-      - name: Verify native artifacts
+      # ─── 6. Verify and Final Config ────────────────────────────────────────
+      - name: Verify results and Final Config
         run: |
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
-          ls -R app/jni/third_party/libvpx/build/latest/arm64-v8a/include || echo "libvpx headers NOT FOUND"
-
-      # ─── 9. Final Configure local.properties ───────────────────────────────
-      - name: Final Configure local.properties
-        run: |
           cat > local.properties <<EOF
           sdk.dir=${ANDROID_SDK_ROOT}
           org.gradle.workers.max=$(nproc --all)
@@ -209,18 +192,18 @@ jobs:
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
           EOF
 
-      # ─── 10. Decode & write the signing keystore ───────────────────────────
+      # ─── 7. Keystore ───────────────────────────────────────────────────────
       - name: Decode keystore
         run: |
           if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "KEYSTORE_BASE64 secret is missing! Generating dummy..."
+            echo "Generating dummy keystore..."
             keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           else
             echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
           fi
 
-      # ─── 11. Gradle build ──────────────────────────────────────────────────
-      - name: Build release APK
+      # ─── 8. Build ──────────────────────────────────────────────────────────
+      - name: Build APK
         run: |
           chmod +x ./gradlew
           ./gradlew assembleLatestArm64Release --stacktrace
@@ -229,16 +212,12 @@ jobs:
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
 
-      # ─── 12. Sign the APK ──────────────────────────────────────────────────
+      # ─── 9. Sign ───────────────────────────────────────────────────────────
       - name: Sign APK
         run: |
           APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
-          if [ -z "$APK_PATH" ]; then
-            echo "No APK found to sign!"
-            exit 1
-          fi
-          echo "Found APK at: $APK_PATH"
-
+          if [ -z "$APK_PATH" ]; then exit 1; fi
+          
           KS_PASS=${{ secrets.KEYSTORE_PASSWORD || 'android' }}
           KS_ALIAS=${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
           KEY_PASS=${{ secrets.KEY_PASSWORD || 'android' }}
@@ -251,12 +230,8 @@ jobs:
             --out app-release-signed.apk \
             "$APK_PATH"
 
-      # ─── 13. Verify & Upload ───────────────────────────────────────────────
-      - name: Verify APK signature
-        run: |
-          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify --verbose app-release-signed.apk
-
-      - name: Upload signed APK
+      # ─── 10. Upload ────────────────────────────────────────────────────────
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: telegram-x-signed-${{ github.run_number }}

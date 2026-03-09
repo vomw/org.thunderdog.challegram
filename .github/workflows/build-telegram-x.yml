@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
-          fetch-depth: 1
+          fetch-depth: 0
           submodules: false
           lfs: true
 
@@ -38,10 +38,13 @@ jobs:
 
       - name: Install NDK and Build Tools
         run: |
+          chmod +x scripts/*.sh || true
+          export PATH=$PATH:$(pwd)/scripts
+          
           # Dynamically determine required NDK from version.properties
-          if [ -f version.properties ]; then
-            P_NDK=$(grep "version.ndk_primary" version.properties | cut -d'=' -f2 | tr -d '\r')
-            L_NDK=$(grep "version.ndk_legacy" version.properties | cut -d'=' -f2 | tr -d '\r')
+          if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
+            P_NDK=$(read-property.sh version.properties version.ndk_primary || true)
+            L_NDK=$(read-property.sh version.properties version.ndk_legacy || true)
           fi
           
           PRIMARY_NDK=${P_NDK:-"23.2.8568313"}
@@ -63,9 +66,10 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev autoconf automake
+          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev
           # Git Optimizations
-          git config --global http.postBuffer 1048576000 # 1GB
+          git config --global http.postBuffer 1048576000
+          git config --global http.maxRequests 1
           git config --global core.compression 0
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
@@ -85,9 +89,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v25-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v26-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v25-${{ runner.os }}-
+            native-v26-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -99,54 +103,51 @@ jobs:
           git config --global url."https://github.com/".insteadOf || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.1 diagnostics
-          ls -la .
-          [ -f version.properties ] && cat version.properties
-          
-          # 5.2 Make all scripts executable
+          # 5.1 Make scripts available
           chmod +x scripts/*.sh scripts/private/*.sh || true
           export PATH=$PATH:$(pwd)/scripts
           
-          # 5.3 Patch scripts for ARM64 Latest build
-          python3 -c \
-          'import os, re
-
+          # 5.2 Patch scripts for ARM64 Latest build
+          python3 -c "
+          import os, re
+          
           def patch_file_regex(path, pattern, replace):
               if not os.path.exists(path): return
-              with open(path, "r") as f: content = f.read()
-              new_content = re.sub(pattern, replace, content, count=1)
+              with open(path, 'r') as f: content = f.read()
+              new_content = re.sub(pattern, replace, content)
               if new_content != content:
-                  with open(path, "w") as f: f.write(new_content)
-                  print(f"Patched {path}")
+                  with open(path, 'w') as f: f.write(new_content)
+                  print(f'Patched {path}')
               else:
-                  print(f"PATTERN NOT MATCHED in {path}")
+                  print(f'PATTERN NOT MATCHED in {path}')
 
-          patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
-
-          ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
+          patch_file_regex('scripts/set-env.sh', r'ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b', 'ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT')
+          patch_file_regex('scripts/private/build-vpx-impl.sh', r'for ABI in [^;]+ ; do', 'for ABI in arm64-v8a ; do')
+          patch_file_regex('scripts/private/build-vpx-impl.sh', r'for FLAVOR in [^;]+ ; do', 'for FLAVOR in latest ; do')
+          
+          ffmpeg_script = 'scripts/private/build-ffmpeg-impl.sh'
           if os.path.exists(ffmpeg_script):
-              with open(ffmpeg_script, "r") as f: lines = f.readlines()
-              with open(ffmpeg_script, "w") as f:
+              with open(ffmpeg_script, 'r') as f: lines = f.readlines()
+              with open(ffmpeg_script, 'w') as f:
                   done = False
                   for line in lines:
                       f.write(line)
-                      if "build_one" in line and not done and "function" not in line:
-                          f.write("exit 0\n")
+                      if 'build_one' in line and not done and 'function' not in line:
+                          f.write('exit 0\n')
                           done = True
-          '
+          "
           
           # Disable reset.sh
           echo "#!/bin/bash" > scripts/reset.sh
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.4 Dynamic Submodule Sync
+          # 5.3 Dynamic Submodule Sync
           if [ -f .gitmodules ]; then
             echo "Starting dynamic submodule sync..."
             git submodule init
-            PATHS=$(git config --file .gitmodules --get-regexp path | awk '\''{print $2}'\'' | tr -d '\''\r'\'')
+            # Simplified path extraction to avoid quote hell
+            PATHS=$(git config --file .gitmodules --get-regexp path | cut -d' ' -f2)
             for sm in $PATHS; do
               echo "Syncing $sm..."
               for i in {1..5}; do
@@ -160,8 +161,8 @@ jobs:
             done
           fi
 
-          # 5.5 Environment Setup
-          export ANDROID_SDK_ROOT=$ANDROID_HOME
+          # 5.4 Environment Setup
+          export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
           CPU_COUNT=$(nproc --all)
           
           cat > local.properties <<EOF
@@ -176,7 +177,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.6 Build Native (if not cached)
+          # 5.5 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else
@@ -192,7 +193,7 @@ jobs:
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
           git submodule status
           cat > local.properties <<EOF
-          sdk.dir=${ANDROID_SDK_ROOT}
+          sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
           org.gradle.workers.max=$(nproc --all)
           telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
@@ -227,7 +228,7 @@ jobs:
           KS_ALIAS=${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
           KEY_PASS=${{ secrets.KEY_PASSWORD || 'android' }}
 
-          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
+          ${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/36.0.0/apksigner sign \
             --ks keystore.jks \
             --ks-pass pass:"$KS_PASS" \
             --ks-key-alias "$KS_ALIAS" \

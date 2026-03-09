@@ -12,6 +12,8 @@ jobs:
     name: Build Signed APK
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    env:
+      TERM: xterm
 
     steps:
       # ─── 1. Checkout repository ──────────────────────────────────────────
@@ -39,12 +41,11 @@ jobs:
       - name: Install NDK and Build Tools
         run: |
           chmod +x scripts/*.sh || true
-          export PATH=$PATH:$(pwd)/scripts
           
           # Dynamically determine required NDK from version.properties
-          if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
-            P_NDK=$(read-property.sh version.properties version.ndk_primary || true)
-            L_NDK=$(read-property.sh version.properties version.ndk_legacy || true)
+          if [ -f version.properties ]; then
+            P_NDK=$(grep "version.ndk_primary" version.properties | cut -d'=' -f2 | tr -d '\r')
+            L_NDK=$(grep "version.ndk_legacy" version.properties | cut -d'=' -f2 | tr -d '\r')
           fi
           
           PRIMARY_NDK=${P_NDK:-"23.2.8568313"}
@@ -66,10 +67,9 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev
+          sudo apt-get install -y yasm nasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev autoconf automake
           # Git Optimizations
-          git config --global http.postBuffer 1048576000
-          git config --global http.maxRequests 1
+          git config --global http.postBuffer 1048576000 # 1GB
           git config --global core.compression 0
           git config --global http.lowSpeedLimit 0
           git config --global http.lowSpeedTime 999999
@@ -89,9 +89,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v26-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v27-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
           restore-keys: |
-            native-v26-${{ runner.os }}-
+            native-v27-${{ runner.os }}-
 
       # ─── 5. Robust Dependency Setup ────────────────────────────────────────
       - name: Setup Dependencies
@@ -103,51 +103,59 @@ jobs:
           git config --global url."https://github.com/".insteadOf || true
           git config --global url."https://github.com/".insteadOf "git@github.com:" || true
           
-          # 5.1 Make scripts available
+          # 5.1 diagnostics
+          ls -la .
+          [ -f version.properties ] && cat version.properties
+          
+          # 5.2 Make all scripts executable
           chmod +x scripts/*.sh scripts/private/*.sh || true
           export PATH=$PATH:$(pwd)/scripts
           
-          # 5.2 Patch scripts for ARM64 Latest build
-          python3 -c "
-          import os, re
-          
-          def patch_file_regex(path, pattern, replace):
-              if not os.path.exists(path): return
-              with open(path, 'r') as f: content = f.read()
-              new_content = re.sub(pattern, replace, content)
-              if new_content != content:
-                  with open(path, 'w') as f: f.write(new_content)
-                  print(f'Patched {path}')
-              else:
-                  print(f'PATTERN NOT MATCHED in {path}')
+          # 5.3 Patch scripts for ARM64 Latest build
+          python3 <<'PYEOF'
+import os, re
 
-          patch_file_regex('scripts/set-env.sh', r'ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b', 'ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT')
-          patch_file_regex('scripts/private/build-vpx-impl.sh', r'for ABI in [^;]+ ; do', 'for ABI in arm64-v8a ; do')
-          patch_file_regex('scripts/private/build-vpx-impl.sh', r'for FLAVOR in [^;]+ ; do', 'for FLAVOR in latest ; do')
-          
-          ffmpeg_script = 'scripts/private/build-ffmpeg-impl.sh'
-          if os.path.exists(ffmpeg_script):
-              with open(ffmpeg_script, 'r') as f: lines = f.readlines()
-              with open(ffmpeg_script, 'w') as f:
-                  done = False
-                  for line in lines:
-                      f.write(line)
-                      if 'build_one' in line and not done and 'function' not in line:
-                          f.write('exit 0\n')
-                          done = True
-          "
+def patch_file_regex(path, pattern, replace):
+    if not os.path.exists(path): 
+        print(f"FILE NOT FOUND: {path}")
+        return
+    with open(path, "r") as f: content = f.read()
+    new_content = re.sub(pattern, replace, content, count=1)
+    if new_content != content:
+        with open(path, "w") as f: f.write(new_content)
+        print(f"Patched {path}")
+    else:
+        print(f"PATTERN NOT MATCHED in {path}")
+
+# Fix set-env.sh typo
+patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
+
+# Force ARM64 Latest build for speed
+patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
+patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
+
+ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
+if os.path.exists(ffmpeg_script):
+    with open(ffmpeg_script, "r") as f: lines = f.readlines()
+    with open(ffmpeg_script, "w") as f:
+        done = False
+        for line in lines:
+            f.write(line)
+            if "build_one" in line and not done and "function" not in line:
+                f.write("exit 0\n")
+                done = True
+PYEOF
           
           # Disable reset.sh
           echo "#!/bin/bash" > scripts/reset.sh
           echo "echo 'Skipping reset...'" >> scripts/reset.sh
           chmod +x scripts/reset.sh
 
-          # 5.3 Dynamic Submodule Sync
+          # 5.4 Dynamic Submodule Sync
           if [ -f .gitmodules ]; then
             echo "Starting dynamic submodule sync..."
             git submodule init
-            # Simplified path extraction to avoid quote hell
-            PATHS=$(git config --file .gitmodules --get-regexp path | cut -d' ' -f2)
+            PATHS=$(git config --file .gitmodules --get-regexp path | cut -d' ' -f2 | tr -d '\r')
             for sm in $PATHS; do
               echo "Syncing $sm..."
               for i in {1..5}; do
@@ -161,7 +169,7 @@ jobs:
             done
           fi
 
-          # 5.4 Environment Setup
+          # 5.5 Environment Setup
           export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
           CPU_COUNT=$(nproc --all)
           
@@ -177,7 +185,7 @@ jobs:
           keystore.file=$(pwd)/keystore.jks
           EOF
           
-          # 5.5 Build Native (if not cached)
+          # 5.6 Build Native (if not cached)
           if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
             ./scripts/setup.sh --skip-sdk-setup
           else

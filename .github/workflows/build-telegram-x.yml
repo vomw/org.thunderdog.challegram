@@ -111,31 +111,31 @@ jobs:
           python3 -c \
           'import os, re
 
-def patch_file_regex(path, pattern, replace):
-    if not os.path.exists(path): return
-    with open(path, "r") as f: content = f.read()
-    new_content = re.sub(pattern, replace, content, count=1)
-    if new_content != content:
-        with open(path, "w") as f: f.write(new_content)
-        print(f"Patched {path}")
-    else:
-        print(f"PATTERN NOT MATCHED in {path}")
+          def patch_file_regex(path, pattern, replace):
+              if not os.path.exists(path): return
+              with open(path, "r") as f: content = f.read()
+              new_content = re.sub(pattern, replace, content, count=1)
+              if new_content != content:
+                  with open(path, "w") as f: f.write(new_content)
+                  print(f"Patched {path}")
+              else:
+                  print(f"PATTERN NOT MATCHED in {path}")
 
-patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
-patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
-patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
+          patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
+          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
 
-ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
-if os.path.exists(ffmpeg_script):
-    with open(ffmpeg_script, "r") as f: lines = f.readlines()
-    with open(ffmpeg_script, "w") as f:
-        done = False
-        for line in lines:
-            f.write(line)
-            if "build_one" in line and not done and "function" not in line:
-                f.write("exit 0\n")
-                done = True
-'
+          ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
+          if os.path.exists(ffmpeg_script):
+              with open(ffmpeg_script, "r") as f: lines = f.readlines()
+              with open(ffmpeg_script, "w") as f:
+                  done = False
+                  for line in lines:
+                      f.write(line)
+                      if "build_one" in line and not done and "function" not in line:
+                          f.write("exit 0\n")
+                          done = True
+          '
           
           # Disable reset.sh
           echo "#!/bin/bash" > scripts/reset.sh

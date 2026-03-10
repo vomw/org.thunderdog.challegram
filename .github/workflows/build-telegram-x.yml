@@ -16,14 +16,19 @@ jobs:
       TERM: xterm
 
     steps:
-      # ─── 1. Checkout repository ──────────────────────────────────────────
-      - name: Checkout repository
+      # ─── 1. Checkout repositories ─────────────────────────────────────────
+      - name: Checkout target repository
         uses: actions/checkout@v4
         with:
           repository: TGX-Android/Telegram-X
           fetch-depth: 0
           submodules: false
           lfs: true
+
+      - name: Checkout helper scripts
+        uses: actions/checkout@v4
+        with:
+          path: helpers
 
       # ─── 2. Java 21 ────────────────────────────────────────────────────────
       - name: Set up JDK 21
@@ -43,7 +48,7 @@ jobs:
           chmod +x scripts/*.sh || true
           
           # Dynamically determine required NDK from version.properties
-          if [ -f version.properties ]; then
+          if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
             P_NDK=$(grep "version.ndk_primary" version.properties | cut -d'=' -f2 | tr -d '\r')
             L_NDK=$(grep "version.ndk_legacy" version.properties | cut -d'=' -f2 | tr -d '\r')
           fi
@@ -67,14 +72,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y yasm nasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev autoconf automake
-          # Git Optimizations
-          git config --global http.postBuffer 1048576000 # 1GB
-          git config --global core.compression 0
-          git config --global http.lowSpeedLimit 0
-          git config --global http.lowSpeedTime 999999
-          git config --global core.preloadindex true
-          git config --global core.fscache true
+          sudo apt-get install -y yasm nasm wget unzip git python3 pkg-config libtool gettext ninja-build meson gperf bison flex libunwind-dev libgl1-mesa-dev libgles2-mesa-dev libjpeg-dev libpng-dev libxml2-utils liblzma-dev libbz2-dev zlib1g-dev libgcrypt20-dev libfontconfig1-dev libfreetype6-dev libx11-dev libxext-dev libssl-dev libcurl4-openssl-dev
 
       # ─── 4. Cache native build outputs ─────────────────────────────────────
       - name: Cache native libraries
@@ -89,111 +87,20 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v27-${{ runner.os }}-${{ hashFiles('version.properties', 'scripts/private/*.sh') }}
+          key: native-v28-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
           restore-keys: |
-            native-v27-${{ runner.os }}-
+            native-v28-${{ runner.os }}-
 
-      # ─── 5. Robust Dependency Setup ────────────────────────────────────────
+      # ─── 5. Setup and Build Dependencies ───────────────────────────────────
       - name: Setup Dependencies
-        run: |
-          set -e
-          set -x
-          set -o pipefail
-          
-          git config --global url."https://github.com/".insteadOf || true
-          git config --global url."https://github.com/".insteadOf "git@github.com:" || true
-          
-          # 5.1 diagnostics
-          ls -la .
-          [ -f version.properties ] && cat version.properties
-          
-          # 5.2 Make all scripts executable
-          chmod +x scripts/*.sh scripts/private/*.sh || true
-          export PATH=$PATH:$(pwd)/scripts
-          
-          # 5.3 Patch scripts for ARM64 Latest build
-          python3 <<'PYEOF'
-          import os, re
-
-          def patch_file_regex(path, pattern, replace):
-              if not os.path.exists(path): 
-                  print(f"FILE NOT FOUND: {path}")
-                  return
-              with open(path, "r") as f: content = f.read()
-              new_content = re.sub(pattern, replace, content, count=1)
-              if new_content != content:
-                  with open(path, "w") as f: f.write(new_content)
-                  print(f"Patched {path}")
-              else:
-                  print(f"PATTERN NOT MATCHED in {path}")
-
-          # Fix set-env.sh typo
-          patch_file_regex("scripts/set-env.sh", r"ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK\b", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
-
-          # Force ARM64 Latest build for speed
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
-          patch_file_regex("scripts/private/build-vpx-impl.sh", r"for FLAVOR in [^;]+ ; do", "for FLAVOR in latest ; do")
-
-          ffmpeg_script = "scripts/private/build-ffmpeg-impl.sh"
-          if os.path.exists(ffmpeg_script):
-              with open(ffmpeg_script, "r") as f: lines = f.readlines()
-              with open(ffmpeg_script, "w") as f:
-                  done = False
-                  for line in lines:
-                      f.write(line)
-                      if "build_one" in line and not done and "function" not in line:
-                          f.write("exit 0\n")
-                          done = True
-          PYEOF
-          
-          # Disable reset.sh
-          echo "#!/bin/bash" > scripts/reset.sh
-          echo "echo 'Skipping reset...'" >> scripts/reset.sh
-          chmod +x scripts/reset.sh
-
-          # 5.4 Dynamic Submodule Sync
-          if [ -f .gitmodules ]; then
-            echo "Starting dynamic submodule sync..."
-            git submodule init
-            PATHS=$(git config --file .gitmodules --get-regexp path | cut -d' ' -f2 | tr -d '\r')
-            for sm in $PATHS; do
-              echo "Syncing $sm..."
-              for i in {1..5}; do
-                git submodule update --init --recursive --force --depth 1 "$sm" && break || {
-                  if [ $i -eq 5 ]; then echo "FAILED to sync $sm, continuing anyway..."; break; fi
-                  git submodule deinit -f "$sm" || true
-                  rm -rf "$sm"
-                  sleep 20
-                }
-              done
-            done
-          fi
-
-          # 5.5 Environment Setup
-          export ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
-          CPU_COUNT=$(nproc --all)
-          
-          cat > local.properties <<EOF
-          sdk.dir=$ANDROID_SDK_ROOT
-          org.gradle.workers.max=$CPU_COUNT
-          telegram.api_id=${{ secrets.TELEGRAM_API_ID || '12345' }}
-          telegram.api_hash=${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}
-          app.id=org.thunderdog.challegram
-          app.name=Telegram X
-          app.download_url=https://github.com/${{ github.repository }}
-          app.sources_url=https://github.com/${{ github.repository }}
-          keystore.file=$(pwd)/keystore.jks
-          EOF
-          
-          # 5.6 Build Native (if not cached)
-          if [ "${{ steps.native-cache.outputs.cache-hit }}" != "true" ]; then
-            ./scripts/setup.sh --skip-sdk-setup
-          else
-            echo "Cache hit, skipping setup.sh and running patches manually..."
-            source ./scripts/set-env.sh --default-sdk-root
-            ./scripts/private/patch-opus-impl.sh || true
-            ./scripts/private/patch-androidx-media-impl.sh || true
-          fi
+        run: bash helpers/ci/setup_dependencies.sh
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID || '12345' }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
+          HELPERS_DIR: ${{ github.workspace }}/helpers/ci
 
       # ─── 6. Verify and Final Config ────────────────────────────────────────
       - name: Verify results and Final Config
@@ -201,7 +108,7 @@ jobs:
           ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
           git submodule status
           cat > local.properties <<EOF
-          sdk.dir=${ANDROID_SDK_ROOT:-$ANDROID_HOME}
+          sdk.dir=${ANDROID_SDK_ROOT}
           org.gradle.workers.max=$(nproc --all)
           telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
           telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
@@ -236,7 +143,7 @@ jobs:
           KS_ALIAS=${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
           KEY_PASS=${{ secrets.KEY_PASSWORD || 'android' }}
 
-          ${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/36.0.0/apksigner sign \
+          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
             --ks keystore.jks \
             --ks-pass pass:"$KS_PASS" \
             --ks-key-alias "$KS_ALIAS" \

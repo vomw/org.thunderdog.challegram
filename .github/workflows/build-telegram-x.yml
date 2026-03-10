@@ -87,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v32-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
+          key: native-v33-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
           restore-keys: |
-            native-v32-${{ runner.os }}-
+            native-v33-${{ runner.os }}-
 
       # ─── 5. Setup and Build Dependencies ───────────────────────────────────
       - name: Setup Dependencies

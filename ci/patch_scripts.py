@@ -33,22 +33,24 @@ def main():
     # 1. Fix set-env.sh typo
     patch_file_simple("scripts/set-env.sh", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK", "ANDROID_SDK_ROOT=$DEFAULT_ANDROID_SDK_ROOT")
 
-    # 2. Fix native linker failure by removing 'tgcalls/' prefix from exclude list
-    # The linker flags in app/jni/CMakeLists.txt incorrectly assume a 'tgcalls' subdirectory for static archives
-    jni_cm = "app/jni/CMakeLists.txt"
-    if os.path.exists(jni_cm):
-        with open(jni_cm, "r") as f:
+    # 2. Fix native linker failure by ensuring absolute paths for excluded static libraries
+    # The linker flags in tgvoip/CMakeLists.txt incorrectly assume a 'tgcalls/' subdirectory prefix
+    # which doesn't exist in the standard CMake build layout.
+    tgvoip_cm = "app/jni/tgvoip/CMakeLists.txt"
+    if os.path.exists(tgvoip_cm):
+        with open(tgvoip_cm, "r") as f:
             content = f.read()
         
-        # Remove 'tgcalls/' prefix from paths like 'tgcalls/libusrsctp.a'
-        new_content = content.replace("tgcalls/lib", "lib")
+        # Replace 'tgcalls/lib' with '${CMAKE_CURRENT_BINARY_DIR}/lib'
+        # This provides the linker with absolute paths to the static archives.
+        new_content = content.replace("tgcalls/lib", "${CMAKE_CURRENT_BINARY_DIR}/lib")
         
         if new_content != content:
-            with open(jni_cm, "w") as f:
+            with open(tgvoip_cm, "w") as f:
                 f.write(new_content)
-            print(f"Patched {jni_cm} to remove 'tgcalls/' prefix from excluded libraries")
+            print(f"Patched {tgvoip_cm} to use absolute paths for excluded libraries")
         else:
-            print(f"Prefix 'tgcalls/' NOT FOUND in {jni_cm}")
+            print(f"Prefix 'tgcalls/' NOT FOUND in {tgvoip_cm}")
 
     # 3. Force ARM64 Latest build for speed in build-vpx-impl.sh
     patch_file_regex("scripts/private/build-vpx-impl.sh", r"for ABI in [^;]+ ; do", "for ABI in arm64-v8a ; do")
@@ -63,7 +65,6 @@ def main():
             done = False
             for line in lines:
                 f.write(line)
-                # Insert exit 0 after the first build_one call (which corresponds to arm64-v8a/latest)
                 if "build_one" in line and not done and "function" not in line:
                     f.write("exit 0\n")
                     done = True

@@ -83,8 +83,9 @@ key.alias=$KS_ALIAS
 key.password=$K_PASS
 EOF
 
-# 7. Environment Setup (local.properties)
+# 7. Environment Setup (Initial local.properties)
 CPU_COUNT=$(nproc --all)
+write_local_properties() {
 cat > local.properties <<EOF
 sdk.dir=$ANDROID_SDK_ROOT
 org.gradle.workers.max=$CPU_COUNT
@@ -96,11 +97,9 @@ app.download_url=https://github.com/$GITHUB_REPOSITORY
 app.sources_url=https://github.com/$GITHUB_REPOSITORY
 keystore.file=$(pwd)/$KS_PROP_FILE
 EOF
+}
 
-echo "Final local.properties content:"
-cat local.properties
-echo "Final keystore.properties content:"
-cat "$KS_PROP_FILE"
+write_local_properties
 
 # 8. Gradle JVM args (performance)
 mkdir -p ~/.gradle
@@ -121,3 +120,12 @@ else
     ./scripts/private/patch-opus-impl.sh || true
     ./scripts/private/patch-androidx-media-impl.sh || true
 fi
+
+# 10. RE-ENSURE local.properties (Crucial: setup.sh overwrites this file)
+echo "Finalizing local.properties..."
+write_local_properties
+
+echo "Final local.properties content:"
+cat local.properties
+echo "Final keystore.properties content:"
+cat "$KS_PROP_FILE"

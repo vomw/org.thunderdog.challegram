@@ -87,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v30-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
+          key: native-v31-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
           restore-keys: |
-            native-v30-${{ runner.os }}-
+            native-v31-${{ runner.os }}-
 
       # ─── 5. Setup and Build Dependencies ───────────────────────────────────
       - name: Setup Dependencies
@@ -102,6 +102,9 @@ jobs:
           CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
           HELPERS_DIR: ${{ github.workspace }}/helpers/ci
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
       # ─── 6. Build the release APK ──────────────────────────────────────────
       - name: Build release APK

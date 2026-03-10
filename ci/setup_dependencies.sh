@@ -11,6 +11,9 @@ set -o pipefail
 # CACHE_HIT (true/false)
 # HELPERS_DIR (path to the 'ci' scripts)
 # KEYSTORE_BASE64 (optional)
+# KEYSTORE_PASSWORD (optional)
+# KEY_ALIAS (optional)
+# KEY_PASSWORD (optional)
 
 # 1. Git Optimizations
 git config --global http.postBuffer 1048576000
@@ -54,14 +57,31 @@ if [ -f .gitmodules ]; then
     done
 fi
 
-# 6. Keystore Decoding
+# 6. Keystore Setup
+# Telegram X expects a properties file pointing to the actual keystore file.
+KS_FILE="debug.keystore"
+KS_PROP_FILE="keystore.properties"
+
 if [ -n "$KEYSTORE_BASE64" ]; then
     echo "Decoding provided keystore..."
-    echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
+    echo "$KEYSTORE_BASE64" | base64 --decode > "$KS_FILE"
+    KS_PASS=${KEYSTORE_PASSWORD:-"android"}
+    KS_ALIAS=${KEY_ALIAS:-"androiddebugkey"}
+    K_PASS=${KEY_PASSWORD:-"android"}
 else
-    echo "No keystore provided, generating dummy for build testing..."
-    keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    echo "No keystore provided, generating one for build testing..."
+    keytool -genkey -v -keystore "$KS_FILE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+    KS_PASS="android"
+    KS_ALIAS="androiddebugkey"
+    K_PASS="android"
 fi
+
+cat > "$KS_PROP_FILE" <<EOF
+keystore.file=$(pwd)/$KS_FILE
+keystore.password=$KS_PASS
+key.alias=$KS_ALIAS
+key.password=$K_PASS
+EOF
 
 # 7. Environment Setup (local.properties)
 CPU_COUNT=$(nproc --all)
@@ -74,8 +94,13 @@ app.id=org.thunderdog.challegram
 app.name=Telegram X
 app.download_url=https://github.com/$GITHUB_REPOSITORY
 app.sources_url=https://github.com/$GITHUB_REPOSITORY
-keystore.file=$(pwd)/keystore.jks
+keystore.file=$(pwd)/$KS_PROP_FILE
 EOF
+
+echo "Final local.properties content:"
+cat local.properties
+echo "Final keystore.properties content:"
+cat "$KS_PROP_FILE"
 
 # 8. Gradle JVM args (performance)
 mkdir -p ~/.gradle
@@ -96,19 +121,3 @@ else
     ./scripts/private/patch-opus-impl.sh || true
     ./scripts/private/patch-androidx-media-impl.sh || true
 fi
-
-# 10. RE-ENSURE local.properties (Safeguard against setup.sh modification)
-cat > local.properties <<EOF
-sdk.dir=$ANDROID_SDK_ROOT
-org.gradle.workers.max=$CPU_COUNT
-telegram.api_id=$TELEGRAM_API_ID
-telegram.api_hash=$TELEGRAM_API_HASH
-app.id=org.thunderdog.challegram
-app.name=Telegram X
-app.download_url=https://github.com/$GITHUB_REPOSITORY
-app.sources_url=https://github.com/$GITHUB_REPOSITORY
-keystore.file=$(pwd)/keystore.jks
-EOF
-
-echo "Final local.properties content:"
-cat local.properties

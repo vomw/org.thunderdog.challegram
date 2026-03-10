@@ -96,3 +96,19 @@ else
     ./scripts/private/patch-opus-impl.sh || true
     ./scripts/private/patch-androidx-media-impl.sh || true
 fi
+
+# 10. RE-ENSURE local.properties (Safeguard against setup.sh modification)
+cat > local.properties <<EOF
+sdk.dir=$ANDROID_SDK_ROOT
+org.gradle.workers.max=$CPU_COUNT
+telegram.api_id=$TELEGRAM_API_ID
+telegram.api_hash=$TELEGRAM_API_HASH
+app.id=org.thunderdog.challegram
+app.name=Telegram X
+app.download_url=https://github.com/$GITHUB_REPOSITORY
+app.sources_url=https://github.com/$GITHUB_REPOSITORY
+keystore.file=$(pwd)/keystore.jks
+EOF
+
+echo "Final local.properties content:"
+cat local.properties

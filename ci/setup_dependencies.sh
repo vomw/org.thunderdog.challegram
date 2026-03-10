@@ -10,6 +10,7 @@ set -o pipefail
 # GITHUB_REPOSITORY
 # CACHE_HIT (true/false)
 # HELPERS_DIR (path to the 'ci' scripts)
+# KEYSTORE_BASE64 (optional)
 
 # 1. Git Optimizations
 git config --global http.postBuffer 1048576000
@@ -53,7 +54,16 @@ if [ -f .gitmodules ]; then
     done
 fi
 
-# 6. Environment Setup (local.properties)
+# 6. Keystore Decoding
+if [ -n "$KEYSTORE_BASE64" ]; then
+    echo "Decoding provided keystore..."
+    echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
+else
+    echo "No keystore provided, generating dummy for build testing..."
+    keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+fi
+
+# 7. Environment Setup (local.properties)
 CPU_COUNT=$(nproc --all)
 cat > local.properties <<EOF
 sdk.dir=$ANDROID_SDK_ROOT
@@ -67,7 +77,16 @@ app.sources_url=https://github.com/$GITHUB_REPOSITORY
 keystore.file=$(pwd)/keystore.jks
 EOF
 
-# 7. Build Native / Apply Patches
+# 8. Gradle JVM args (performance)
+mkdir -p ~/.gradle
+cat >> ~/.gradle/gradle.properties <<EOF
+org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
+org.gradle.parallel=true
+org.gradle.caching=true
+android.useAndroidX=true
+EOF
+
+# 9. Build Native / Apply Patches
 if [ "$CACHE_HIT" != "true" ]; then
     echo "Cache miss, running full setup..."
     ./scripts/setup.sh --skip-sdk-setup

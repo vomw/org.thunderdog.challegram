@@ -48,7 +48,7 @@ jobs:
           chmod +x scripts/*.sh || true
           
           # Dynamically determine required NDK from version.properties
-          if [ -f scripts/read-property.sh ] && [ -f version.properties ]; then
+          if [ -f version.properties ]; then
             P_NDK=$(grep "version.ndk_primary" version.properties | cut -d'=' -f2 | tr -d '\r')
             L_NDK=$(grep "version.ndk_legacy" version.properties | cut -d'=' -f2 | tr -d '\r')
           fi
@@ -87,9 +87,9 @@ jobs:
             app/src/main/libs
             app/jni/third_party/ffmpeg/build
             app/jni/third_party/libvpx/build
-          key: native-v28-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
+          key: native-v29-${{ runner.os }}-${{ hashFiles('version.properties', 'helpers/ci/*.sh', 'helpers/ci/*.py') }}
           restore-keys: |
-            native-v28-${{ runner.os }}-
+            native-v29-${{ runner.os }}-
 
       # ─── 5. Setup and Build Dependencies ───────────────────────────────────
       - name: Setup Dependencies
@@ -101,60 +101,39 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           CACHE_HIT: ${{ steps.native-cache.outputs.cache-hit }}
           HELPERS_DIR: ${{ github.workspace }}/helpers/ci
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
 
-      # ─── 6. Verify and Final Config ────────────────────────────────────────
-      - name: Verify results and Final Config
-        run: |
-          ls -R app/jni/third_party/ffmpeg/build/latest/arm64-v8a/include || echo "FFmpeg headers NOT FOUND"
-          git submodule status
-          cat > local.properties <<EOF
-          sdk.dir=${ANDROID_SDK_ROOT}
-          org.gradle.workers.max=$(nproc --all)
-          telegram.api_id=${{ secrets.TELEGRAM_API_ID }}
-          telegram.api_hash=${{ secrets.TELEGRAM_API_HASH }}
-          EOF
-
-      # ─── 7. Keystore ───────────────────────────────────────────────────────
-      - name: Decode keystore
-        run: |
-          if [ -z "${{ secrets.KEYSTORE_BASE64 }}" ]; then
-            echo "Generating dummy keystore..."
-            keytool -genkey -v -keystore keystore.jks -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          else
-            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > keystore.jks
-          fi
-
-      # ─── 8. Build ──────────────────────────────────────────────────────────
-      - name: Build APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleLatestArm64Release --stacktrace
+      # ─── 6. Build the release APK ──────────────────────────────────────────
+      - name: Build release APK
+        run: bash helpers/ci/build_apk.sh
         env:
-          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/23.2.8568313
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID || '12345' }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}
 
-      # ─── 9. Sign ───────────────────────────────────────────────────────────
+      # ─── 7. Sign the APK ───────────────────────────────────────────────────
       - name: Sign APK
-        run: |
-          APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
-          if [ -z "$APK_PATH" ]; then exit 1; fi
-          
-          KS_PASS=${{ secrets.KEYSTORE_PASSWORD || 'android' }}
-          KS_ALIAS=${{ secrets.KEY_ALIAS || 'androiddebugkey' }}
-          KEY_PASS=${{ secrets.KEY_PASSWORD || 'android' }}
+        run: bash helpers/ci/sign_apk.sh
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-          $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
-            --ks keystore.jks \
-            --ks-pass pass:"$KS_PASS" \
-            --ks-key-alias "$KS_ALIAS" \
-            --key-pass pass:"$KEY_PASS" \
-            --out app-release-signed.apk \
-            "$APK_PATH"
-
-      # ─── 10. Upload ────────────────────────────────────────────────────────
-      - name: Upload APK
+      # ─── 8. Upload Artifact ────────────────────────────────────────────────
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
           name: telegram-x-signed-${{ github.run_number }}
           path: app-release-signed.apk
           retention-days: 30
+
+      # ─── 9. (Optional) Create a GitHub Release ─────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app-release-signed.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -105,6 +105,7 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          SOCKS_PROXY: "socks5://127.0.0.1:60439"
 
       # ─── 6. Build the release APK ──────────────────────────────────────────
       - name: Build release APK

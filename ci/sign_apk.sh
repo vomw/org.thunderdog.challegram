@@ -8,6 +8,10 @@ set -x
 # KEY_ALIAS
 # KEY_PASSWORD
 
+# Determine build tools version dynamically from version.properties
+BUILD_TOOLS_VERSION=$(grep "version.build_tools" version.properties | cut -d'=' -f2 | tr -d '\r' || echo "36.0.0")
+echo "Using Build Tools Version: $BUILD_TOOLS_VERSION"
+
 # Identify the APK (release only)
 APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
 if [ -z "$APK_PATH" ]; then
@@ -21,8 +25,8 @@ KS_PASS=${KEYSTORE_PASSWORD:-"android"}
 KS_ALIAS=${KEY_ALIAS:-"androiddebugkey"}
 K_PASS=${KEY_PASSWORD:-"android"}
 
-# Sign using the decoded keystore (it's always debug.keystore in our CI)
-$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
+# Sign using the decoded keystore
+$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner sign \
   --ks debug.keystore \
   --ks-pass pass:"$KS_PASS" \
   --ks-key-alias "$KS_ALIAS" \
@@ -33,39 +37,60 @@ $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
 echo "APK signed successfully."
 
 # Verify
-$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify --verbose app-release-signed.apk
+$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/apksigner verify --verbose app-release-signed.apk
 
-# Extract APK info for artifact naming
-AAPT_PATH="${ANDROID_SDK_ROOT}/build-tools/36.0.0/aapt"
-if [ -f "$AAPT_PATH" ]; then
-    BADGING=$($AAPT_PATH dump badging app-release-signed.apk)
-    
-    # Robust extraction using grep and sed
-    PACKAGE_NAME=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*name='\([^']\*)'.*/\1/p" | head -n 1)
-    VERSION_NAME=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*versionName='\([^']\*)'.*/\1/p" | head -n 1)
-    VERSION_CODE=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*versionCode='\([^']\*)'.*/\1/p" | head -n 1)
-    
-    # Get application label (app name)
-    APP_NAME=$(echo "$BADGING" | grep "^application-label:" | sed -n "s/.*application-label:'\([^']\*)'.*/\1/p" | head -n 1)
-    if [ -z "$APP_NAME" ]; then
-        APP_NAME="TelegramX"
-    fi
-    
-    # Sanitize for filename
-    SAFE_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
-    SAFE_VERSION_NAME=$(echo "$VERSION_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
-    
-    FINAL_NAME="${SAFE_APP_NAME}_${PACKAGE_NAME}_v${SAFE_VERSION_NAME}_c${VERSION_CODE}_arm64-v8a.apk"
-    cp app-release-signed.apk "$FINAL_NAME"
+# Extract APK info for artifact naming using a robust Python script
+cat > extract_metadata.py <<EOF
+import sys
+import subprocess
+import re
 
-    echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
-    echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
-    echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
-    echo "final_name=$FINAL_NAME" >> "$GITHUB_OUTPUT"
-    echo "app_name=$SAFE_APP_NAME" >> "$GITHUB_OUTPUT"
+def get_metadata(apk_path, aapt_path):
+    try:
+        result = subprocess.run([aapt_path, "dump", "badging", apk_path], capture_output=True, text=True, check=True)
+        output = result.stdout
+        
+        package_match = re.search(r"package: name='([^']*)' versionCode='([^']*)' versionName='([^']*)'", output)
+        label_match = re.search(r"application-label:'([^']*)'", output)
+        
+        package_name = package_match.group(1) if package_match else "unavailable"
+        version_code = package_match.group(2) if package_match else "unavailable"
+        version_name = package_match.group(3) if package_match else "unavailable"
+        app_name = label_match.group(1) if label_match else "unavailable"
+        
+        return app_name, package_name, version_name, version_code
+    except Exception as e:
+        print(f"Error extracting metadata: {e}", file=sys.stderr)
+        return "unavailable", "unavailable", "unavailable", "unavailable"
+
+if __name__ == "__main__":
+    apk = sys.argv[1]
+    aapt = sys.argv[2]
+    app_name, package_name, version_name, version_code = get_metadata(apk, aapt)
     
-    echo "Extracted APK Info: App=$APP_NAME, Package=$PACKAGE_NAME, Version=$VERSION_NAME, Code=$VERSION_CODE"
-else
-    echo "aapt not found, skipping info extraction"
-    echo "final_name=app-release-signed.apk" >> "$GITHUB_OUTPUT"
-fi
+    # Sanitize names for filenames
+    safe_app = re.sub(r'[^a-zA-Z0-9._-]', '_', app_name)
+    safe_version = re.sub(r'[^a-zA-Z0-9._-]', '_', version_name)
+    
+    print(f"app_name={safe_app}")
+    print(f"package_name={package_name}")
+    print(f"version_name={version_name}")
+    print(f"safe_version_name={safe_version}")
+    print(f"version_code={version_code}")
+EOF
+
+METADATA=$(python3 extract_metadata.py app-release-signed.apk "$ANDROID_SDK_ROOT/build-tools/$BUILD_TOOLS_VERSION/aapt")
+
+# Parse python output into GITHUB_OUTPUT
+while IFS= read -r line; do
+    echo "$line" >> "$GITHUB_OUTPUT"
+done <<< "$METADATA"
+
+# Source the metadata to use in shell
+eval $(echo "$METADATA" | sed 's/=/="/;s/$/"/')
+
+FINAL_NAME="${app_name}_${package_name}_v${safe_version_name}_c${version_code}_arm64-v8a.apk"
+cp app-release-signed.apk "$FINAL_NAME"
+echo "final_name=$FINAL_NAME" >> "$GITHUB_OUTPUT"
+
+echo "Extracted APK Info: App=$app_name, Package=$package_name, Version=$version_name, Code=$version_code"

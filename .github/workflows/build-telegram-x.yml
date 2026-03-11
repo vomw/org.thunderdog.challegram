@@ -116,6 +116,7 @@ jobs:
 
       # ─── 7. Sign the APK ───────────────────────────────────────────────────
       - name: Sign APK
+        id: sign-apk
         run: bash helpers/ci/sign_apk.sh
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
@@ -127,8 +128,8 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-x-signed-${{ github.run_number }}
-          path: app-release-signed.apk
+          name: ${{ steps.sign-apk.outputs.package_name || 'telegram-x' }}-${{ steps.sign-apk.outputs.version_name || 'release' }}-c${{ steps.sign-apk.outputs.version_code || '0' }}-arm64-v8a
+          path: ${{ steps.sign-apk.outputs.final_name || 'app-release-signed.apk' }}
           retention-days: 30
 
       # ─── 9. (Optional) Create a GitHub Release ─────────────────────────────
@@ -136,7 +137,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: app-release-signed.apk
+          files: ${{ steps.sign-apk.outputs.final_name || 'app-release-signed.apk' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

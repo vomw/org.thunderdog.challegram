@@ -3,25 +3,19 @@ set -e
 set -x
 set -o pipefail
 
-# 1. Access remote version.properties to get current config if local is missing or as a source of truth
-# Use curl with proxy if provided, otherwise standard curl
-CURL_CMD="curl.exe -s"
-if [ -n "$SOCKS_PROXY" ]; then
-    CURL_CMD="curl.exe --proxy $SOCKS_PROXY -s"
-fi
+# Expected environment variables:
+# ANDROID_SDK_ROOT
+# TELEGRAM_API_ID
+# TELEGRAM_API_HASH
+# GITHUB_REPOSITORY
+# CACHE_HIT (true/false)
+# HELPERS_DIR (path to the 'ci' scripts)
+# KEYSTORE_BASE64 (optional)
+# KEYSTORE_PASSWORD (optional)
+# KEY_ALIAS (optional)
+# KEY_PASSWORD (optional)
 
-# Try to get latest versions from main branch
-REMOTE_VERSION_URL="https://raw.githubusercontent.com/TGX-Android/Telegram-X/main/version.properties"
-$CURL_CMD "$REMOTE_VERSION_URL" > remote_version.properties || true
-
-# Use remote as base, then override with local if exists
-if [ -f remote_version.properties ]; then
-    cp remote_version.properties version.properties
-fi
-# Note: we already check out the repo, so we should have a local version.properties.
-# If for some reason we don't, the above helps.
-
-# 2. Git Optimizations
+# 1. Git Optimizations
 git config --global http.postBuffer 1048576000
 git config --global core.compression 0
 git config --global http.lowSpeedLimit 0
@@ -32,19 +26,19 @@ git config --global core.fscache true
 git config --global url."https://github.com/".insteadOf || true
 git config --global url."https://github.com/".insteadOf "git@github.com:" || true
 
-# 3. Make all scripts executable
+# 2. Make all scripts executable
 chmod +x scripts/*.sh scripts/private/*.sh || true
 export PATH=$PATH:$(pwd)/scripts
 
-# 4. Patch scripts using the independent Python script
+# 3. Patch scripts using the independent Python script
 python3 "${HELPERS_DIR}/patch_scripts.py"
 
-# 5. Disable reset.sh to protect potential cache remnants
+# 4. Disable reset.sh to protect potential cache remnants
 echo "#!/bin/bash" > scripts/reset.sh
 echo "echo 'Skipping reset...'" >> scripts/reset.sh
 chmod +x scripts/reset.sh
 
-# 6. Dynamic Submodule Sync
+# 5. Dynamic Submodule Sync
 if [ -f .gitmodules ]; then
     echo "Starting dynamic submodule sync..."
     git submodule init
@@ -62,7 +56,7 @@ if [ -f .gitmodules ]; then
     done
 fi
 
-# 7. Keystore Setup
+# 6. Keystore Setup
 KS_FILE="debug.keystore"
 KS_PROP_FILE="keystore.properties"
 
@@ -87,7 +81,7 @@ key.alias=$KS_ALIAS
 key.password=$K_PASS
 EOF
 
-# 8. Environment Setup
+# 7. Environment Setup
 CPU_COUNT=$(nproc --all)
 write_local_properties() {
 cat > local.properties <<EOF
@@ -105,7 +99,7 @@ EOF
 
 write_local_properties
 
-# 9. Gradle JVM args (performance)
+# 8. Gradle JVM args (performance)
 mkdir -p ~/.gradle
 cat >> ~/.gradle/gradle.properties <<EOF
 org.gradle.jvmargs=-Xmx6g -XX:+UseParallelGC
@@ -114,7 +108,7 @@ org.gradle.caching=true
 android.useAndroidX=true
 EOF
 
-# 10. Build Native / Apply Patches
+# 9. Build Native / Apply Patches
 if [ "$CACHE_HIT" != "true" ]; then
     echo "Cache miss, running full setup..."
     ./scripts/setup.sh --skip-sdk-setup
@@ -125,6 +119,6 @@ else
     ./scripts/private/patch-androidx-media-impl.sh || true
 fi
 
-# 11. RE-ENSURE local.properties
+# 10. RE-ENSURE local.properties
 echo "Finalizing local.properties..."
 write_local_properties

@@ -39,21 +39,32 @@ $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner verify --verbose app-release-sign
 AAPT_PATH="${ANDROID_SDK_ROOT}/build-tools/36.0.0/aapt"
 if [ -f "$AAPT_PATH" ]; then
     BADGING=$($AAPT_PATH dump badging app-release-signed.apk)
-    PACKAGE_NAME=$(echo "$BADGING" | grep "package" | sed -n "s/.*name='\([^']*\)'.*/\1/p")
-    VERSION_NAME=$(echo "$BADGING" | grep "package" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
-    VERSION_CODE=$(echo "$BADGING" | grep "package" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")
-
-    # Rename file for more descriptive artifact download
+    
+    # Robust extraction using grep and sed
+    PACKAGE_NAME=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*name='\([^']\*)'.*/\1/p" | head -n 1)
+    VERSION_NAME=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*versionName='\([^']\*)'.*/\1/p" | head -n 1)
+    VERSION_CODE=$(echo "$BADGING" | grep "^package:" | sed -n "s/.*versionCode='\([^']\*)'.*/\1/p" | head -n 1)
+    
+    # Get application label (app name)
+    APP_NAME=$(echo "$BADGING" | grep "^application-label:" | sed -n "s/.*application-label:'\([^']\*)'.*/\1/p" | head -n 1)
+    if [ -z "$APP_NAME" ]; then
+        APP_NAME="TelegramX"
+    fi
+    
+    # Sanitize for filename
+    SAFE_APP_NAME=$(echo "$APP_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
     SAFE_VERSION_NAME=$(echo "$VERSION_NAME" | sed 's/[^a-zA-Z0-9._-]/_/g')
-    FINAL_NAME="${PACKAGE_NAME}_v${SAFE_VERSION_NAME}_c${VERSION_CODE}_arm64-v8a.apk"
+    
+    FINAL_NAME="${SAFE_APP_NAME}_${PACKAGE_NAME}_v${SAFE_VERSION_NAME}_c${VERSION_CODE}_arm64-v8a.apk"
     cp app-release-signed.apk "$FINAL_NAME"
 
     echo "package_name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
     echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
     echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
     echo "final_name=$FINAL_NAME" >> "$GITHUB_OUTPUT"
+    echo "app_name=$SAFE_APP_NAME" >> "$GITHUB_OUTPUT"
     
-    echo "Extracted APK Info: Package=$PACKAGE_NAME, Version=$VERSION_NAME, Code=$VERSION_CODE"
+    echo "Extracted APK Info: App=$APP_NAME, Package=$PACKAGE_NAME, Version=$VERSION_NAME, Code=$VERSION_CODE"
 else
     echo "aapt not found, skipping info extraction"
     echo "final_name=app-release-signed.apk" >> "$GITHUB_OUTPUT"

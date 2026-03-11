@@ -8,6 +8,7 @@ set -x
 # KEY_ALIAS
 # KEY_PASSWORD
 
+# Identify the APK (release only)
 APK_PATH=$(find app/build/outputs/apk -name "*.apk" | grep "release" | head -1)
 if [ -z "$APK_PATH" ]; then
     echo "No APK found to sign!"
@@ -20,8 +21,9 @@ KS_PASS=${KEYSTORE_PASSWORD:-"android"}
 KS_ALIAS=${KEY_ALIAS:-"androiddebugkey"}
 K_PASS=${KEY_PASSWORD:-"android"}
 
+# Sign using the decoded keystore (it's always debug.keystore in our CI)
 $ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner sign \
-  --ks keystore.jks \
+  --ks debug.keystore \
   --ks-pass pass:"$KS_PASS" \
   --ks-key-alias "$KS_ALIAS" \
   --key-pass pass:"$K_PASS" \

@@ -2,10 +2,10 @@ name: Build & Sign Telegram X APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ * ]
   pull_request:
-    branches: [ main ]
-  workflow_dispatch:  # Allow manual trigger
+    branches: [ * ]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,7 +20,7 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          repository: TGX-Android/Telegram-X
+          repository: vomw/Telegram-X
           fetch-depth: 0
           submodules: false
           lfs: true
@@ -130,7 +130,7 @@ jobs:
         with:
           name: ${{ steps.sign-apk.outputs.app_name || 'TelegramX' }}-${{ steps.sign-apk.outputs.package_name || 'org.thunderdog.challegram' }}-${{ steps.sign-apk.outputs.version_name || 'release' }}-c${{ steps.sign-apk.outputs.version_code || '0' }}-arm64-v8a
           path: ${{ steps.sign-apk.outputs.final_name || 'app-release-signed.apk' }}
-          retention-days: 30
+          retention-days: 1
 
       # ─── 9. (Optional) Create a GitHub Release ─────────────────────────────
       - name: Create GitHub Release

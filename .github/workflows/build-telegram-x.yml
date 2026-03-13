@@ -110,6 +110,7 @@ jobs:
       - name: Build release APK
         run: bash helpers/ci/build_apk.sh
         env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/23.2.8568313
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID || '12345' }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH || 'abcdef0123456789abcdef0123456789' }}

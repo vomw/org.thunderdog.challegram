@@ -20,7 +20,7 @@ jobs:
       - name: Checkout target repository
         uses: actions/checkout@v4
         with:
-          repository: TGX-Android/Telegram-X
+          repository: vomw/Telegram-X
           fetch-depth: 0
           submodules: false
           lfs: true
